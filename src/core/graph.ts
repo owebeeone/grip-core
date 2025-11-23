@@ -624,13 +624,15 @@ export class GripContextNode implements GripContextNodeIf {
 
   // One producer per Grip key - ProducerRecords cache the state of the
   // producer graph.
-  readonly producers = new Map<Grip<any>, ProducerRecord>();
+  readonly producers: Map<Grip<any>, ProducerRecord> = new Map();
   // One weakly-referenced drip per Grip at this destination context
-  readonly consumers = new Map<Grip<any>, WeakRef<Drip<any>>>();
+  readonly consumers: Map<Grip<any>, WeakRef<Drip<any>>> = new Map();
+  // A map of deleted consumers by grip key. These will be reused if the grip is requested again.
+  readonly deletedConsumers: Map<Grip<any>, WeakRef<Drip<any>>> = new Map();
   // Destination-side resolved map: which provider context id supplies each Grip
-  readonly resolvedProviders = new Map<Grip<any>, GripContextNode>();
+  readonly resolvedProviders: Map<Grip<any>, GripContextNode> = new Map();
   // Source-side: producer records per tap instance
-  readonly producerByTap = new Map<Tap | TapFactory, ProducerRecord>();
+  readonly producerByTap: Map<Tap | TapFactory, ProducerRecord> = new Map();
   private lastSeen = Date.now();
 
   /**
@@ -819,7 +821,19 @@ export class GripContextNode implements GripContextNodeIf {
     if (!drip) {
       const ctx = this.get_context() as GripContext;
       if (!ctx) throw new Error("Context is gone"); // This should never happen.
-      drip = new Drip<T>(ctx, grip.defaultValue as unknown as T | undefined);
+      const deletedDripRef = this.deletedConsumers.get(grip as unknown as Grip<any>);
+      const oldDrip = deletedDripRef?.deref();
+      if (deletedDripRef && !oldDrip) {
+        // We're goind to re-use the old drip, so delete the deleted container.
+        this.deletedConsumers.delete(grip as unknown as Grip<any>);
+      }
+      // There is a window where a drip is still being referenced by a React component.
+      // Here we re-use the old drip (for this grip in this context) if it's still being referenced.
+      if (oldDrip) {
+        drip = oldDrip;
+      } else {
+        drip = new Drip<T>(ctx, grip.defaultValue as unknown as T | undefined);
+      }
       this.recordConsumer(grip, drip);
       drip.addOnZeroSubscribers(() => {
         this.removeConsumerForGrip(grip);
@@ -848,6 +862,10 @@ export class GripContextNode implements GripContextNodeIf {
 
   // Remove the drip for this grip.
   removeConsumerForGrip<T>(grip: Grip<T>): void {
+    const wr = this.consumers.get(grip as unknown as Grip<any>);
+    if (wr && wr.deref()) {
+      this.deletedConsumers.set(grip as unknown as Grip<any>, wr);
+    }
     this.consumers.delete(grip as unknown as Grip<any>);
     this.unregisterSource(grip);
     // Clear resolved provider so future subscriptions re-resolve and re-link

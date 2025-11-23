@@ -11,6 +11,7 @@
 
 // Grips
 export type { Grip } from "./core/grip";
+export { GripRegistry, GripOf } from "./core/grip";
 
 // Contexts
 export type { GripContext, GripContextLike } from "./core/context";

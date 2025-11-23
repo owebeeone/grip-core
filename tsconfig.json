@@ -1,6 +1,7 @@
 {
   "compilerOptions": {
     "target": "ES2019",
+    "lib": ["ES2021"],
     "module": "ESNext",
     "moduleResolution": "Node",
     "strict": true,

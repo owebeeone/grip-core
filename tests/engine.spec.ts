@@ -48,6 +48,31 @@ describe("Engine shared drip semantics", () => {
     // zero-subscribers is notified when last unsubscribes
     expect(zero).toBe(1);
   });
+
+  it("reuses zero-subscriber drip when re-requested before GC", () => {
+    const registry = new GripRegistry();
+    const defineGrip = GripOf(registry);
+    const VALUE = defineGrip<number>("Value", 0);
+    const grok = new Grok(registry);
+    const ctx = grok.mainHomeContext.createChild();
+    const tap = createAtomValueTap(VALUE, { initial: 42 }) as unknown as Tap;
+    grok.registerTap(tap);
+
+    // Query to create a drip
+    const d1 = grok.query(VALUE, ctx);
+    expect(d1.get()).toBe(42);
+
+    // Subscribe and then unsubscribe to trigger zero-subscriber state
+    const unsubscribe = d1.subscribe(() => {});
+    unsubscribe();
+    grok.flush(); // Allow zero-subscriber callback to run
+
+    // Re-query the same grip at the same context
+    // The old drip should be reused if it hasn't been GC'd yet
+    const d2 = grok.query(VALUE, ctx);
+    expect(d2).toBe(d1); // Same instance, not a new one
+    expect(d2.get()).toBe(42);
+  });
 });
 
 describe("Engine parameter-driven updates", () => {

@@ -225,6 +225,7 @@ export class FunctionTap<
   getState<K extends keyof StateRec>(grip: StateRec[K]): GripValue<StateRec[K]> | undefined {
     return this.state.get(grip as unknown as Grip<any>) as GripValue<StateRec[K]> | undefined;
   }
+  
   setState<K extends keyof StateRec>(
     grip: StateRec[K],
     value: GripValue<StateRec[K]> | undefined,
