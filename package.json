@@ -1,0 +1,22 @@
+{
+  "name": "@owebeeone/grip-core",
+  "version": "0.1.0",
+  "description": "Framework-agnostic core runtime for GRIP (Generalized Retrieval Intent Provisioning).",
+  "main": "dist/index.cjs",
+  "module": "dist/index.mjs",
+  "types": "dist/index.d.ts",
+  "sideEffects": false,
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsup src/index.ts --dts --format cjs,esm",
+    "test": "vitest"
+  },
+  "devDependencies": {
+    "@types/node": "^24.10.1",
+    "tsup": "^8.0.0",
+    "typescript": "^5.0.0",
+    "vitest": "^4.0.13"
+  }
+}
