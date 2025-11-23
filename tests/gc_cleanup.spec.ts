@@ -136,4 +136,3 @@ describe("GC cleanup of parent-child relationships", () => {
     expect(mainNode.get_children_nodes().some((n) => n.id === child2.id)).toBe(true);
   });
 });
-

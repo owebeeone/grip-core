@@ -174,4 +174,3 @@ describe("TapMatcher", () => {
     expect(matcher.dripSubscriptions.has(REGION)).toBe(false);
   });
 });
-

@@ -30,20 +30,17 @@ export {
   AtomTap,
   AtomTapHandle,
   createAtomValueTap,
-  createMultiAtomValueTap
+  createMultiAtomValueTap,
 } from "./core/atom_tap";
 
-export {
-  FunctionTap,
-  createFunctionTap
-} from "./core/function_tap";
+export { FunctionTap, createFunctionTap } from "./core/function_tap";
 
 export {
   BaseAsyncTap,
   createAsyncValueTap,
   createAsyncMultiTap,
   createAsyncHomeValueTap,
-  createAsyncHomeMultiTap
+  createAsyncHomeMultiTap,
 } from "./core/async_tap";
 
 // Query system
@@ -56,7 +53,7 @@ export type {
   GraphDumpOptions,
   GraphDumpNodeContext,
   GraphDumpNodeTap,
-  GraphDumpNodeDrip
+  GraphDumpNodeDrip,
 } from "./core/graph_dump";
 export { GraphDumpKeyRegistry, GripGraphDumper } from "./core/graph_dump";
 
@@ -66,4 +63,3 @@ export { createDebouncer } from "./core/debounce";
 
 // Logging helper
 export { getLoggingTagsGrip } from "./logging";
-

@@ -92,4 +92,3 @@ describe("Query helpers", () => {
     expect(regionConditions?.get("eu")).toBe(2);
   });
 });
-

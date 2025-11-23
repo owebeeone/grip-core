@@ -138,9 +138,11 @@ describe("FunctionTap", () => {
     const aTap = createAtomValueTap(A, { initial: 10 }) as unknown as AtomTap<number>;
     grok.registerTapAt(P, aTap as any);
 
-    
     // Set op '/': compute() will set B to 1 when b==0 to avoid Infinity
-    const opTap = createAtomValueTap(OP, { initial: "/", handleGrip: OP_HANDLE }) as unknown as AtomTap<string>;
+    const opTap = createAtomValueTap(OP, {
+      initial: "/",
+      handleGrip: OP_HANDLE,
+    }) as unknown as AtomTap<string>;
     grok.registerTapAt(D, opTap as any);
 
     // Function tap (register after OP provider so first compute sees '/')
@@ -169,9 +171,15 @@ describe("FunctionTap", () => {
     const aTap = createAtomValueTap(A, { initial: 1 }) as unknown as AtomTap<number>;
     grok.registerTapAt(P, aTap as any);
 
-    const opTap1 = createAtomValueTap(OP, { initial: "+", handleGrip: OP_HANDLE }) as unknown as AtomTap<string>;
+    const opTap1 = createAtomValueTap(OP, {
+      initial: "+",
+      handleGrip: OP_HANDLE,
+    }) as unknown as AtomTap<string>;
     grok.registerTapAt(D1, opTap1 as any);
-    const opTap2 = createAtomValueTap(OP, { initial: "+", handleGrip: OP_HANDLE }) as unknown as AtomTap<string>;
+    const opTap2 = createAtomValueTap(OP, {
+      initial: "+",
+      handleGrip: OP_HANDLE,
+    }) as unknown as AtomTap<string>;
     grok.registerTapAt(D2, opTap2 as any);
 
     // Function tap
@@ -271,7 +279,12 @@ describe("FunctionTap", () => {
     grok.registerTapAt(P, aTap as any);
 
     // Simple stateful FunctionTap from README
-    const simpleTap = createFunctionTap<{ value: typeof VALUE }, { a: typeof A }, {}, { b: typeof B}>({
+    const simpleTap = createFunctionTap<
+      { value: typeof VALUE },
+      { a: typeof A },
+      {},
+      { b: typeof B }
+    >({
       provides: [VALUE],
       homeParamGrips: [A],
       handleGrip: HANDLE,
@@ -295,7 +308,7 @@ describe("FunctionTap", () => {
     expect(h.getState(B)).toBe(0);
 
     // Increase A above threshold; first compute uses old B, then B increments
-    ;(aTap as any).set(11);
+    (aTap as any).set(11);
     grok.flush();
     expect(h.getState(B)).toBe(1);
     expect(val.get()).toBe(11); // a + b (before any new compute with updated state)
@@ -305,4 +318,3 @@ describe("FunctionTap", () => {
     expect(val.get()).toBe(13); // (A=11) + (B=2)
   });
 });
-

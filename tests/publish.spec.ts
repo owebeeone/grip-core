@@ -77,4 +77,3 @@ describe("Engine publish()", () => {
     expect(grok.query(G2, D).get()).toBe(22);
   });
 });
-

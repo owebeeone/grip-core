@@ -66,4 +66,3 @@ describe("AtomTap", () => {
     expect(grok.query(VALUE, destR).get()).toBe("R");
   });
 });
-

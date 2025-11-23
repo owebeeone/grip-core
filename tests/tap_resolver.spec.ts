@@ -505,4 +505,3 @@ describe("SimpleResolver", () => {
     });
   });
 });
-

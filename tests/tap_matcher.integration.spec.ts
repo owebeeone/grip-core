@@ -172,4 +172,3 @@ describe("MatchingContext Integration", () => {
     expect(getResolvedTap(consumer, gripN)).toBe(tapB);
   });
 });
-

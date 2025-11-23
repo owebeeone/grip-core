@@ -60,4 +60,3 @@ describe("WeatherPanel-style multi-context, multi-parent with independent simple
     expect(grok.query(VALUE, B).get()).toBe("BB");
   });
 });
-
