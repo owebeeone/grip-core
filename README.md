@@ -110,28 +110,39 @@ grok.registerTap(tempConverterTap);
 
 ### **3. BaseAsyncTap: Asynchronous Data Sources**
 
-Use `BaseAsyncTap` (or factory functions) for fetching data from APIs, databases, or other async sources. It handles caching, cancellation, and request deduplication.
+Use `BaseAsyncTap` (or factory functions) for fetching data from APIs, databases, or other async sources. It handles caching, cancellation, and request deduplication. Async taps can optionally expose request state via a `stateGrip` (loading/success/error/stale) and a controller via `controllerGrip` (manual retry/refresh/reset).
 
 ```ts
-import {
-  createAsyncValueTap,
-  LruTtlCache,
-  GripRegistry,
-  GripOf,
-} from "@owebeeone/grip-core";
+  import {
+    createAsyncValueTap,
+    LruTtlCache,
+    GripRegistry,
+    GripOf,
+    AsyncRequestState,
+    AsyncTapController,
+  } from "@owebeeone/grip-core";
 
 const registry = new GripRegistry();
 const defineGrip = GripOf(registry);
 
-const USER_ID = defineGrip<string>("UserId", "");
+  const USER_ID = defineGrip<string>("UserId", "");
 const USER_DATA = defineGrip<{ name: string; email: string }>("UserData", {
   name: "",
   email: "",
 });
+const USER_DATA_STATE = defineGrip<AsyncRequestState>("UserDataState", {
+  state: { type: "idle", retryAt: null },
+  requestKey: null,
+  hasListeners: false,
+  history: [],
+});
+const USER_DATA_CONTROLLER = defineGrip<AsyncTapController>("UserDataController");
 
 // Create an async tap that fetches user data
 const userDataTap = createAsyncValueTap({
   provides: [USER_DATA],
+  stateGrip: USER_DATA_STATE, // optional: expose async request state
+  controllerGrip: USER_DATA_CONTROLLER, // optional: expose retry/refresh/reset
   destinationParamGrips: [USER_ID], // Fetch based on user ID
   requestKeyOf: (params) => params.destination[USER_ID], // Cache key
   fetcher: async (params, signal) => {
@@ -146,6 +157,9 @@ const userDataTap = createAsyncValueTap({
     cache: new LruTtlCache({ maxSize: 100, ttlMs: 5 * 60 * 1000 }), // 5 min cache
     cacheTtlMs: 5 * 60 * 1000,
     latestOnly: true, // Ignore out-of-order responses
+    historySize: 10, // keep recent state transitions (0 to disable)
+    retry: { maxRetries: 3, initialDelayMs: 1000, backoffMultiplier: 2 },
+    refreshBeforeExpiryMs: 5000, // schedule refresh before TTL expiry
   },
 });
 

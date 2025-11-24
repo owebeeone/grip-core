@@ -39,7 +39,7 @@ import {
   RemoveBindingResult,
   evaluationToString,
 } from "./query_evaluator";
-import { consola } from "consola";
+import { consola } from "./logger";
 
 const logger = consola.withTag("core/matcher.ts");
 

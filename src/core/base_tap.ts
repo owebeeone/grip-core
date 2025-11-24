@@ -16,7 +16,7 @@ import type { GripContext, GripContextLike } from "./context";
 import type { Grok } from "./grok";
 import type { Tap } from "./tap";
 import type { GripContextNode, Destination, ProducerRecord, DestinationParams } from "./graph";
-import { consola } from "consola";
+import { consola } from "./logger";
 
 const logger = consola.withTag("core/base_tap.ts");
 

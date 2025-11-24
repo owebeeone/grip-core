@@ -37,7 +37,7 @@ import type {
   RetryConfig,
   StateHistoryEntry,
 } from "./async_request_state";
-import { consola } from "consola";
+import { consola } from "./logger";
 
 const logger = consola.withTag("core/async_tap.ts");
 

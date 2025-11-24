@@ -10,8 +10,7 @@
  */
 
 // Grips
-export type { Grip } from "./core/grip";
-export { GripRegistry, GripOf } from "./core/grip";
+export { Grip, GripRegistry, GripOf } from "./core/grip";
 
 // Contexts
 export type { GripContext, GripContextLike } from "./core/context";
@@ -26,11 +25,16 @@ export type { GripContextNode } from "./core/graph";
 export { Drip } from "./core/drip";
 
 // Taps
-export type { Tap } from "./core/tap";
+export type { Tap, TapFactory } from "./core/tap";
+export { BaseTap, BaseTapNoParams } from "./core/base_tap";
 export {
   AtomTap,
   AtomTapHandle,
+  AtomValueTap,
   createAtomValueTap,
+  MultiAtomTapHandle,
+  MultiAtomTap,
+  MultiAtomValueTap,
   createMultiAtomValueTap,
 } from "./core/atom_tap";
 
@@ -45,8 +49,7 @@ export {
 } from "./core/async_tap";
 
 // Query system
-export type { Query } from "./core/query";
-export { withOneOf, withAnyOf, QueryBuilderFactory } from "./core/query";
+export { Query, withOneOf, withAnyOf, QueryBuilderFactory } from "./core/query";
 
 // Graph dump / debugging
 export type {

@@ -10,7 +10,8 @@
     "dist"
   ],
   "scripts": {
-    "build": "tsup src/index.ts --dts --format cjs,esm",
+    "build": "tsup",
+    "dev": "tsup --watch",
     "test": "vitest"
   },
   "devDependencies": {
@@ -18,6 +19,7 @@
     "prettier": "^3.6.2",
     "tsup": "^8.0.0",
     "typescript": "^5.0.0",
+    "util": "^0.12.5",
     "vitest": "^4.0.13"
   }
 }

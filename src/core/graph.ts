@@ -33,7 +33,7 @@ import type { Tap, TapFactory } from "./tap";
 import { Grok } from "./grok";
 import { GripContextNodeIf } from "./context_node";
 import { TaskHandleHolder } from "./task_queue";
-import { consola } from "consola";
+import { consola } from "./logger";
 
 const logger = consola.withTag("core/graph.ts");
 

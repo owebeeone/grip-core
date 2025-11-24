@@ -24,7 +24,7 @@ import { Tap, TapFactory } from "./tap";
 import { Grok } from "./grok";
 import { GripContextNode, ProducerRecord } from "./graph";
 import { EvaluationDelta, TapAttribution } from "./query_evaluator";
-import { consola } from "consola";
+import { consola } from "./logger";
 
 const logger = consola.withTag("core/tap_resolver.ts");
 

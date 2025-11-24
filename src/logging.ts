@@ -19,7 +19,7 @@
  * - Error tracking and reporting
  */
 
-import { consola } from "consola";
+import { consola } from "./core/logger";
 import { Grip, GripRegistry } from "./core/grip";
 import { GripContext } from "./core/context";
 
