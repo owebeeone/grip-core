@@ -2,7 +2,8 @@ import { describe, it, expect, beforeEach } from "vitest";
 import { Grok } from "../src/core/grok";
 import { GripRegistry, GripOf, Grip } from "../src/core/grip";
 import { BaseTap } from "../src/core/base_tap";
-import type { Tap, GripContext } from "../src/core/tap";
+import type { Tap } from "../src/core/tap";
+import type { GripContext } from "../src/core/context";
 import type { TapDestinationContext, Destination } from "../src/core/graph";
 
 // Helper to create a simple test tap with destination context support
@@ -13,6 +14,12 @@ function createTestTap(
   return new (class extends BaseTap {
     constructor() {
       super({ provides });
+    }
+    produceOnParams(): void {
+      throw new Error("Not implemented");
+    }
+    produceOnDestParams(): void {
+      throw new Error("Not implemented");
     }
 
     produce(opts?: { destContext?: GripContext }): void {
