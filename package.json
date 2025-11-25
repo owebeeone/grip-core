@@ -2,12 +2,30 @@
   "name": "@owebeeone/grip-core",
   "version": "0.1.0",
   "description": "Framework-agnostic core runtime for GRIP (Generalized Retrieval Intent Provisioning).",
-  "main": "dist/index.cjs",
+  "author": "Gianni Mariani",
+  "license": "MIT",
+  "main": "dist/index.js",
   "module": "dist/index.mjs",
   "types": "dist/index.d.ts",
   "sideEffects": false,
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.mjs",
+      "require": "./dist/index.js"
+    }
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/owebeeone/grip-core.git"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
   "files": [
-    "dist"
+    "dist",
+    "README.md",
+    "LICENSE"
   ],
   "scripts": {
     "build": "tsup",

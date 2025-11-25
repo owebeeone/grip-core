@@ -327,7 +327,7 @@ npm install @owebeeone/grip-core
 ## **Framework Integration**
 
 - **`@owebeeone/grip-react`**: React hooks and components
-- **`@owebeeone/grip-vue`**: Vue composables and components (coming soon)
+- **`@owebeeone/grip-vue`**: Vue composables and components
 
 The core library is framework-agnostic and can be used with any framework or even vanilla JavaScript.
 
