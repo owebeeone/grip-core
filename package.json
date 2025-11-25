@@ -1,6 +1,6 @@
 {
   "name": "@owebeeone/grip-core",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Framework-agnostic core runtime for GRIP (Generalized Retrieval Intent Provisioning).",
   "author": "Gianni Mariani",
   "license": "MIT",
