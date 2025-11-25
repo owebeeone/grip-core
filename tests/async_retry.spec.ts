@@ -115,7 +115,7 @@ describe("Async Retry System", () => {
     expect(drip.get()).toBe(42);
   });
 
-  it("does not schedule retry when no listeners exist", async () => {
+  it("schedules retry when state Grip is queried (state Grips are output Grips)", async () => {
     const OUT = defineGrip<number>("Out", 0);
     const STATE = defineGrip<AsyncRequestState>("State", {
       state: { type: "idle", retryAt: null },
@@ -141,7 +141,7 @@ describe("Async Retry System", () => {
     const ctx = grok.mainPresentationContext.createChild();
     const stateDrip = grok.query(STATE, ctx);
 
-    // Query state Grip (not output Grip) - this doesn't count as a listener
+    // Query state Grip - state Grips are considered output Grips, so this counts as a listener
     // Wait for initial request to fail
     await sleep(50);
     grok.flush();
@@ -149,9 +149,9 @@ describe("Async Retry System", () => {
 
     const state = stateDrip.get()!;
     expect(hasError(state.state)).toBe(true);
-    // No retry should be scheduled because no listeners
-    expect(hasScheduledRetry(state.state)).toBe(false);
-    expect(state.state.retryAt).toBeNull();
+    // Retry should be scheduled because state Grip counts as a listener
+    expect(hasScheduledRetry(state.state)).toBe(true);
+    expect(state.state.retryAt).not.toBeNull();
   });
 
   it("cancels retry when listeners drop to zero", async () => {

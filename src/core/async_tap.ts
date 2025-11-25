@@ -25,7 +25,7 @@
 import { BaseTap } from "./base_tap";
 import { Grip } from "./grip";
 import type { GripContext } from "./context";
-import type { DestinationParams } from "./graph";
+import type { DestinationParams, Destination, TapDestinationContext } from "./graph";
 import type { AsyncCache } from "./async_cache";
 import { LruTtlCache } from "./async_cache";
 import type { Tap } from "./tap";
@@ -42,6 +42,26 @@ import { consola } from "./logger";
 const logger = consola.withTag("core/async_tap.ts");
 
 /**
+ * Shared request state for destinations using the same request key.
+ * 
+ * Manages:
+ * - Shared retry/refresh timers (shared across all destinations with same key)
+ * - Shared retry attempt count
+ * - Set of destinations using this request key
+ * - Delayed cleanup timer
+ */
+interface SharedRequestState {
+  requestKey: string;
+  retryTimer?: any | null;
+  refreshTimer?: any | null;
+  retryAttempt: number; // Shared retry attempt count (incremented per retry, shared across destinations)
+  destinations: Set<Destination>; // Destinations using this request key
+  cleanupTimer?: any | null; // Timer for delayed cleanup when destinations drop to zero
+  // Note: abortController is per-destination (in DestState), not shared
+  // Requests are deduplicated per key via this.pending Map, but abort is per-destination
+}
+
+/**
  * Per-destination state tracking for async operations.
  *
  * Manages:
@@ -49,26 +69,24 @@ const logger = consola.withTag("core/async_tap.ts");
  * - Request sequence numbers for latest-only filtering
  * - Request keys for caching and deduplication
  * - Deadline timers for request timeouts
- * - Retry state for failed requests
- * - Phase 2: State tracking fields
+ * - State tracking fields
+ * 
+ * Note: retryTimer, refreshTimer, and retryAttempt moved to SharedRequestState
  */
 interface DestState {
-  controller?: AbortController; // Phase 2: Keep for backward compatibility, will use abortController
-  abortController?: AbortController; // Phase 2: Dedicated AbortController for in-flight requests
+  controller?: AbortController; // Keep for backward compatibility, will use abortController
+  abortController?: AbortController; // Dedicated AbortController for in-flight requests
   seq: number;
-  key?: string; // Phase 2: Keep for backward compatibility, will use requestKey
-  requestKey?: string | null; // Phase 2: The cache key for this request
+  key?: string; // Keep for backward compatibility, will use requestKey
+  requestKey?: string | null; // The cache key for this request
   deadlineTimer?: any;
   pendingRetryArmed?: boolean;
-  // Phase 2: State tracking fields
+  // State tracking fields
   currentState: RequestState;
-  listenerCount: number;
-  retryAttempt: number;
-  retryTimer?: any | null;
-  refreshTimer?: any | null;
   history: StateHistoryEntry[];
   historySize: number;
   tapController?: AsyncTapController; // Controller instance (different from AbortController)
+  // Note: retryTimer, refreshTimer, and retryAttempt moved to SharedRequestState
 }
 
 /**
@@ -89,9 +107,10 @@ export interface BaseAsyncTapOptions {
   cacheTtlMs?: number;
   latestOnly?: boolean;
   deadlineMs?: number;
-  historySize?: number; // Phase 0: Number of state transitions to keep in history (default: 10, 0 = disabled)
-  retry?: RetryConfig; // Phase 0: Retry configuration for exponential backoff
-  refreshBeforeExpiryMs?: number; // Phase 0: Refresh data before TTL expires (milliseconds before expiry)
+  historySize?: number; // Number of state transitions to keep in history (default: 10, 0 = disabled)
+  retry?: RetryConfig; // Retry configuration for exponential backoff
+  refreshBeforeExpiryMs?: number; // Refresh data before TTL expires (milliseconds before expiry)
+  cleanupDelayMs?: number; // Delay before cleaning up shared request state when destinations drop to zero (default: 1000ms, 0 = immediate)
 }
 
 /**
@@ -114,12 +133,15 @@ export abstract class BaseAsyncTap extends BaseTap {
   protected readonly asyncOpts: Required<Omit<BaseAsyncTapOptions, "retry">> & {
     retry?: RetryConfig;
   };
-  private readonly destState = new WeakMap<GripContext, DestState>();
+  // State is now stored in Destination.tapContext
+  // private readonly destState = new WeakMap<GripContext, DestState>();
   private readonly cache: AsyncCache<string, unknown>;
   private readonly pending = new Map<string, Promise<unknown>>();
   private readonly allControllers = new Set<AbortController>();
   private readonly allTimers = new Set<any>();
-  // Phase 0: Optional state and controller Grips
+  // Shared request state keyed by request key
+  private readonly requestStates = new Map<string, SharedRequestState>();
+  // Optional state and controller Grips
   readonly stateGrip?: Grip<AsyncRequestState>;
   readonly controllerGrip?: Grip<AsyncTapController>;
 
@@ -128,11 +150,11 @@ export abstract class BaseAsyncTap extends BaseTap {
     destinationParamGrips?: readonly Grip<any>[];
     homeParamGrips?: readonly Grip<any>[];
     async?: BaseAsyncTapOptions;
-    // Phase 0: Optional state and controller Grips
+    // Optional state and controller Grips
     stateGrip?: Grip<AsyncRequestState>;
     controllerGrip?: Grip<AsyncTapController>;
   }) {
-    // Phase 2: Add state and controller Grips to provides if they exist
+    // Add state and controller Grips to provides if they exist
     const providesList: Grip<any>[] = [...opts.provides];
     if (opts.stateGrip) {
       providesList.push(opts.stateGrip);
@@ -153,37 +175,282 @@ export abstract class BaseAsyncTap extends BaseTap {
       cacheTtlMs: a.cacheTtlMs ?? 0,
       latestOnly: a.latestOnly ?? true,
       deadlineMs: a.deadlineMs ?? 0,
-      historySize: a.historySize ?? 10, // Phase 0: Default history size
-      retry: a.retry, // Phase 0: Retry config (optional)
-      refreshBeforeExpiryMs: a.refreshBeforeExpiryMs ?? 0, // Phase 0: Default no refresh before expiry
+      historySize: a.historySize ?? 10, // Default history size
+      retry: a.retry, // Retry config (optional)
+      refreshBeforeExpiryMs: a.refreshBeforeExpiryMs ?? 0, // Default no refresh before expiry
+      cleanupDelayMs: a.cleanupDelayMs ?? 1000, // Default 1 second delay before cleanup
     };
     this.cache = this.asyncOpts.cache;
-    // Phase 0: Store optional state and controller Grips
+    // Store optional state and controller Grips
     this.stateGrip = opts.stateGrip;
     this.controllerGrip = opts.controllerGrip;
   }
 
   /**
    * Get or create destination state for async operations.
+   * State is now stored in Destination.tapContext, not WeakMap.
    */
   protected getDestState(dest: GripContext): DestState {
-    let s = this.destState.get(dest);
-    if (!s) {
-      // Phase 2: Initialize state tracking fields
-      s = {
-        seq: 0,
-        currentState: { type: "idle", retryAt: null },
-        listenerCount: 0,
-        retryAttempt: 0,
+    const destination = this.getDestination(dest);
+    if (!destination) {
+      throw new Error('Destination not found for context');
+    }
+    
+    // Get context directly from Destination (stored on destination.tapContext)
+    const context = destination.getTapContext() as (TapDestinationContext & { destState: DestState }) | undefined;
+    if (!context) {
+      throw new Error('Destination context not found - this should not happen');
+    }
+    
+    return context.destState;
+  }
+
+
+  /**
+   * Get or create shared request state for a request key.
+   * Shared request state manages retry/refresh timers that are shared
+   * across all destinations using the same request key.
+   */
+  private getOrCreateRequestState(requestKey: string): SharedRequestState {
+    let requestState = this.requestStates.get(requestKey);
+    if (!requestState) {
+      requestState = {
+        requestKey,
         retryTimer: null,
         refreshTimer: null,
-        history: [],
-        historySize: this.asyncOpts.historySize,
-        requestKey: null,
+        retryAttempt: 0, // Shared retry attempt count
+        destinations: new Set(),
       };
-      this.destState.set(dest, s);
+      this.requestStates.set(requestKey, requestState);
     }
-    return s;
+    return requestState;
+  }
+
+  /**
+   * Schedule delayed cleanup of shared request state.
+   * This allows UI components that quickly unmount/remount to reuse
+   * in-flight requests and timers instead of canceling and restarting.
+   */
+  private scheduleRequestStateCleanup(requestKey: string, requestState: SharedRequestState): void {
+    // Cancel any existing cleanup timer
+    if (requestState.cleanupTimer) {
+      clearTimeout(requestState.cleanupTimer);
+      this.allTimers.delete(requestState.cleanupTimer);
+    }
+    
+    const cleanupDelayMs = this.asyncOpts.cleanupDelayMs ?? 1000; // Default 1 second
+    
+    if (cleanupDelayMs <= 0) {
+      // Immediate cleanup
+      this.cleanupRequestState(requestKey, requestState);
+      return;
+    }
+    
+    // Schedule delayed cleanup
+    requestState.cleanupTimer = setTimeout(() => {
+      this.allTimers.delete(requestState.cleanupTimer!);
+      requestState.cleanupTimer = null;
+      
+      // Check again if destinations were re-added during the delay
+      if (requestState.destinations.size === 0) {
+        this.cleanupRequestState(requestKey, requestState);
+      }
+    }, cleanupDelayMs);
+    
+    this.allTimers.add(requestState.cleanupTimer);
+  }
+
+  /**
+   * Actually cleanup and destroy shared request state.
+   * 
+   * Note: This resets retryAttempt to 0 (via deletion and recreation).
+   * If a destination is re-added after cleanup, it gets a fresh retryAttempt.
+   * This is intentional - after cleanup delay, retry attempts reset.
+   */
+  private cleanupRequestState(requestKey: string, requestState: SharedRequestState): void {
+    // Cancel timers
+    if (requestState.retryTimer) {
+      clearTimeout(requestState.retryTimer);
+      this.allTimers.delete(requestState.retryTimer);
+      requestState.retryTimer = null;
+    }
+    if (requestState.refreshTimer) {
+      clearTimeout(requestState.refreshTimer);
+      this.allTimers.delete(requestState.refreshTimer);
+      requestState.refreshTimer = null;
+    }
+    
+    // Reset retryAttempt (will be 0 when state is recreated)
+    // This is intentional: after cleanup delay, retry attempts reset
+    requestState.retryAttempt = 0;
+    
+    // Remove from map
+    this.requestStates.delete(requestKey);
+  }
+
+  /**
+   * Factory method to create destination context.
+   * Called by Destination constructor to create tap-specific context.
+   */
+  createDestinationContext(destination: Destination): TapDestinationContext {
+    const destState: DestState = {
+      seq: 0,
+      currentState: { type: "idle", retryAt: null },
+      history: [],
+      historySize: this.asyncOpts.historySize,
+      requestKey: null,
+    };
+    
+    // Helper to remove destination from shared request state and cleanup if needed
+    const removeFromRequestState = (requestKey: string | null) => {
+      if (!requestKey) return;
+      
+      const requestState = this.requestStates.get(requestKey);
+      if (!requestState) return;
+      
+      // Remove this destination from the set
+      requestState.destinations.delete(destination);
+      
+      // If no more destinations using this key, schedule delayed cleanup
+      if (requestState.destinations.size === 0) {
+        this.scheduleRequestStateCleanup(requestKey, requestState);
+      }
+    };
+    
+    // Helper to cancel delayed cleanup if destination is re-added
+    const cancelRequestStateCleanup = (requestKey: string | null) => {
+      if (!requestKey) return;
+      
+      const requestState = this.requestStates.get(requestKey);
+      if (!requestState) return;
+      
+      // Cancel any pending cleanup timer
+      if (requestState.cleanupTimer) {
+        clearTimeout(requestState.cleanupTimer);
+        this.allTimers.delete(requestState.cleanupTimer);
+        requestState.cleanupTimer = null;
+      }
+    };
+    
+    const context: TapDestinationContext & { 
+      destState: DestState;
+      isDetached: boolean;
+    } = {
+      destState,
+      isDetached: false,
+      dripAdded: (grip) => {
+        if (this.isOutputGrip(grip)) {
+          // Cancel any pending cleanup for this destination's request key
+          // (destination is being re-added, so we want to keep the shared state)
+          const requestKey = destState.requestKey;
+          if (requestKey) {
+            cancelRequestStateCleanup(requestKey);
+            // Re-add destination to shared request state if it was removed
+            const requestState = this.getOrCreateRequestState(requestKey);
+            requestState.destinations.add(destination);
+          }
+          
+          // Update state and republish
+          const destCtx = destination.getContext();
+          if (destCtx) {
+            this.publishState(destCtx);
+          }
+        }
+      },
+      dripRemoved: (grip) => {
+        if (this.isOutputGrip(grip)) {
+          const destCtx = destination.getContext();
+          if (!destCtx) return;
+          
+          // IMPORTANT: The grip has already been removed by super.onDisconnect() before this callback
+          // So we check if there are any remaining output grips after the removal
+          let hasOutputGrips = false;
+          for (const g of destination.getGrips()) {
+            if (this.isOutputGrip(g)) {
+              hasOutputGrips = true;
+              break;
+            }
+          }
+          
+          // If no output grips remain, this was the last listener
+          // Handle cleanup that was previously in onDisconnect()
+          if (!hasOutputGrips) {
+            // Remove from shared request state (will cleanup timers if last destination)
+            const requestKey = destState.requestKey ?? null;
+            removeFromRequestState(requestKey);
+            
+            // Clear retryAt in state (no more listeners to retry for)
+            destState.currentState = { ...destState.currentState, retryAt: null };
+            
+            // Clear controller if exists (no listeners to control)
+            if (this.controllerGrip && destState.tapController) {
+              destState.tapController = undefined;
+              this.publishController(destCtx);
+            }
+          }
+          
+          // Always publish state update (listener count changed)
+          this.publishState(destCtx);
+        }
+      },
+      onDetach: () => {
+        // Mark as detached - no more listeners
+        context.isDetached = true;
+        
+        const destCtx = destination.getContext();
+        
+        // Remove from shared request state (will cleanup timers if last destination)
+        const requestKey = destState.requestKey ?? null;
+        removeFromRequestState(requestKey);
+        
+        // Clear retryAt in state
+        destState.currentState = { ...destState.currentState, retryAt: null };
+        
+        // Abort in-flight request only if no other destinations are using the same request key
+        // IMPORTANT: Abort controller is per-destination, but requests are shared per key
+        // Only abort the shared Promise if no other destinations need it
+        if (destState.abortController && destState.requestKey) {
+          // Check if other destinations are using the same request key
+          const requestState = this.requestStates.get(destState.requestKey);
+          const otherDestinationsUsingKey = requestState 
+            ? Array.from(requestState.destinations).filter(d => d !== destination)
+            : [];
+          
+          if (otherDestinationsUsingKey.length === 0) {
+            // No other destinations using this key - safe to abort shared Promise
+            destState.abortController.abort();
+            this.allControllers.delete(destState.abortController);
+            
+            // Remove shared Promise from pending map (other destinations would have been using it)
+            this.pending.delete(destState.requestKey);
+          } else {
+            // Other destinations are using the key - don't abort shared Promise
+            // Just clear this destination's abort controller reference
+            // The shared Promise continues for other destinations
+          }
+          
+          // Clear abortController from this destination's state
+          destState.abortController = undefined;
+        }
+        
+        // Clear controller if exists
+        if (this.controllerGrip && destState.tapController) {
+          destState.tapController = undefined;
+          if (destCtx) {
+            this.publishController(destCtx);
+          }
+        }
+        
+        // Note: onDetach is called when all grips are removed, so there are no output Grips left
+        // We don't need to publish state here since there are no listeners to receive it
+        // The dripRemoved callback already handled the last-grip cleanup
+      },
+    };
+    
+    // Context is stored directly on Destination.tapContext (set by Destination constructor)
+    // No need to store in WeakMap - Destination is the authority on lifetime
+    
+    return context;
   }
 
   /**
@@ -214,16 +481,18 @@ export abstract class BaseAsyncTap extends BaseTap {
    */
   protected abstract getResetUpdates(params: DestinationParams): Map<Grip<any>, any>;
 
-  // Phase 2: State management methods
+  // State management methods
   /**
    * Get current request state for a destination context.
    */
   getRequestState(dest: GripContext): AsyncRequestState {
     const state = this.getDestState(dest);
+    const destination = this.getDestination(dest);
+    
     return {
       state: state.currentState,
       requestKey: state.requestKey ?? null,
-      hasListeners: state.listenerCount > 0,
+      hasListeners: !!destination,
       history: Object.freeze([...state.history]) as ReadonlyArray<StateHistoryEntry>,
     };
   }
@@ -232,14 +501,14 @@ export abstract class BaseAsyncTap extends BaseTap {
    * Manually trigger a retry for a destination context.
    */
   protected retry(dest: GripContext, forceRefetch?: boolean): void {
-    throw new Error("Not implemented - Phase 0");
+    throw new Error("Not implemented");
   }
 
   /**
    * Manually trigger a refresh for a destination context.
    */
   protected refresh(dest: GripContext, forceRefetch?: boolean): void {
-    throw new Error("Not implemented - Phase 0");
+    throw new Error("Not implemented");
   }
 
   /**
@@ -256,15 +525,34 @@ export abstract class BaseAsyncTap extends BaseTap {
 
     // Cancel any scheduled retries/refreshes
     this.cancelRetry(dest);
-    if (state.refreshTimer) {
-      clearTimeout(state.refreshTimer);
-      this.allTimers.delete(state.refreshTimer);
-      state.refreshTimer = null;
+    
+    // Cancel shared refresh timer if this destination is the only one using it
+    const requestKey = state.requestKey;
+    if (requestKey) {
+      const requestState = this.requestStates.get(requestKey);
+      if (requestState && requestState.refreshTimer) {
+        const destination = this.getDestination(dest);
+        if (destination) {
+          // Only cancel if this is the only destination
+          if (requestState.destinations.size === 1) {
+            clearTimeout(requestState.refreshTimer);
+            this.allTimers.delete(requestState.refreshTimer);
+            requestState.refreshTimer = null;
+          }
+        }
+      }
     }
 
     // Clear history
     state.history = [];
-    state.retryAttempt = 0;
+    
+    // Reset shared retry attempt for this request key
+    if (requestKey) {
+      const requestState = this.requestStates.get(requestKey);
+      if (requestState) {
+        requestState.retryAttempt = 0;
+      }
+    }
 
     // Reset state to idle
     state.currentState = { type: "idle", retryAt: null };
@@ -286,17 +574,15 @@ export abstract class BaseAsyncTap extends BaseTap {
   protected cancelRetry(dest: GripContext): void {
     const state = this.getDestState(dest);
 
-    if (state.retryTimer) {
-      clearTimeout(state.retryTimer);
-      this.allTimers.delete(state.retryTimer);
-      state.retryTimer = null;
-    }
-
     // Clear retryAt in state
     if (state.currentState.retryAt !== null) {
       state.currentState = { ...state.currentState, retryAt: null };
       this.publishState(dest);
     }
+
+    // Note: We don't cancel the shared retry timer here because other destinations
+    // might still need it. The timer will be cleaned up when all destinations are removed
+    // via the shared request state cleanup mechanism.
   }
 
   /**
@@ -305,24 +591,6 @@ export abstract class BaseAsyncTap extends BaseTap {
   private publishState(dest: GripContext): void {
     if (!this.stateGrip || !this.engine || !this.homeContext || !this.producer) {
       return;
-    }
-
-    // Phase 3: Recalculate listener count based on current destination state
-    // The Destination record is removed when there are no more listeners, so if it doesn't exist, count is 0
-    const state = this.getDestState(dest);
-    const destination = this.getDestination(dest);
-    if (destination) {
-      // Count only output Grips (not state or controller Grips)
-      let outputGripCount = 0;
-      for (const g of destination.getGrips()) {
-        if (this.isOutputGrip(g)) {
-          outputGripCount++;
-        }
-      }
-      state.listenerCount = outputGripCount;
-    } else {
-      // Destination doesn't exist = no listeners
-      state.listenerCount = 0;
     }
 
     const asyncState = this.getRequestState(dest);
@@ -349,6 +617,7 @@ export abstract class BaseAsyncTap extends BaseTap {
    * Create controller closure for a destination.
    */
   private createController(dest: GripContext): AsyncTapController {
+    const destination = this.getDestination(dest);
     return {
       retry: (forceRefetch?: boolean) => {
         const state = this.getDestState(dest);
@@ -361,14 +630,27 @@ export abstract class BaseAsyncTap extends BaseTap {
 
         // Cancel any scheduled retries/refreshes
         this.cancelRetry(dest);
-        if (state.refreshTimer) {
-          clearTimeout(state.refreshTimer);
-          this.allTimers.delete(state.refreshTimer);
-          state.refreshTimer = null;
+        
+        // Cancel shared refresh timer if this destination is the only one using it
+        // (Note: This is a best-effort cancellation - other destinations might still need it)
+        const requestKey = state.requestKey;
+        if (requestKey && destination) {
+          const requestState = this.requestStates.get(requestKey);
+          if (requestState && requestState.refreshTimer) {
+            // Only cancel if this is the only destination
+            if (requestState.destinations.size === 1) {
+              clearTimeout(requestState.refreshTimer);
+              this.allTimers.delete(requestState.refreshTimer);
+              requestState.refreshTimer = null;
+            }
+          }
         }
 
-        // Increment retry attempt (for exponential backoff)
-        state.retryAttempt += 1;
+        // Increment shared retry attempt (for exponential backoff)
+        if (requestKey) {
+          const requestState = this.getOrCreateRequestState(requestKey);
+          requestState.retryAttempt += 1;
+        }
 
         // Initiate new request
         this.kickoff(dest, forceRefetch === true);
@@ -384,10 +666,23 @@ export abstract class BaseAsyncTap extends BaseTap {
 
         // Cancel any scheduled retries/refreshes
         this.cancelRetry(dest);
-        if (state.refreshTimer) {
-          clearTimeout(state.refreshTimer);
-          this.allTimers.delete(state.refreshTimer);
-          state.refreshTimer = null;
+        
+        // Cancel shared refresh timer if this destination is the only one using it
+        const requestKey = state.requestKey;
+        if (requestKey) {
+          const requestState = this.requestStates.get(requestKey);
+          if (requestState && requestState.refreshTimer) {
+            // Only cancel if this is the only destination with listeners
+            const destination = this.getDestination(dest);
+            if (destination) {
+            // Only cancel if this is the only destination
+            if (requestState.destinations.size === 1) {
+                clearTimeout(requestState.refreshTimer);
+                this.allTimers.delete(requestState.refreshTimer);
+                requestState.refreshTimer = null;
+              }
+            }
+          }
         }
 
         // Initiate new request (will use stale-while-revalidate if data exists)
@@ -495,52 +790,42 @@ export abstract class BaseAsyncTap extends BaseTap {
   /**
    * Schedule retry with exponential backoff.
    * Only schedules if listeners exist and retry config is provided.
+   * Uses shared request state for timers and retry attempts.
    */
   private scheduleRetry(dest: GripContext): void {
-    const state = this.getDestState(dest);
-
-    // Recalculate listener count to ensure it's accurate
-    // (Destination might have been updated since last publishState call)
     const destination = this.getDestination(dest);
-    if (destination) {
-      let outputGripCount = 0;
-      for (const g of destination.getGrips()) {
-        if (this.isOutputGrip(g)) {
-          outputGripCount++;
-        }
-      }
-      state.listenerCount = outputGripCount;
-    } else {
-      // Destination doesn't exist = no listeners
-      state.listenerCount = 0;
-    }
+    if (!destination) return;
 
-    // Don't schedule retry if no listeners
-    if (state.listenerCount === 0) {
-      return;
-    }
+    const state = this.getDestState(dest);
+    const requestKey = state.requestKey;
+    if (!requestKey) return;
+
+    const requestState = this.getOrCreateRequestState(requestKey);
+    requestState.destinations.add(destination);
+    
+    // If destination exists, it has listeners (destinations only exist when they have output Grips)
 
     // Don't schedule if no retry config
     if (!this.asyncOpts.retry) {
       return;
     }
 
-    // Cancel any existing retry timer
-    if (state.retryTimer) {
-      clearTimeout(state.retryTimer);
-      this.allTimers.delete(state.retryTimer);
-      state.retryTimer = null;
+    // Use shared retry timer and attempt count
+    // Cancel existing timer if any
+    if (requestState.retryTimer) {
+      clearTimeout(requestState.retryTimer);
+      this.allTimers.delete(requestState.retryTimer);
+      requestState.retryTimer = null;
     }
 
-    // Calculate retry delay
-    const retryAt = this.calculateRetryDelay(state.retryAttempt, Date.now());
+    // Calculate retry delay using shared retryAttempt
+    const retryAt = this.calculateRetryDelay(requestState.retryAttempt, Date.now());
     if (retryAt === null) {
-      // Max retries reached, don't schedule
-      return;
+      return; // Max retries reached
     }
 
-    // Increment retry attempt (for next retry calculation)
-    state.retryAttempt += 1;
+    // Increment shared retry attempt
+    requestState.retryAttempt += 1;
 
     // Update state with retryAt
     const newState: RequestState = {
@@ -549,16 +834,21 @@ export abstract class BaseAsyncTap extends BaseTap {
     };
     this.addHistoryEntry(dest, newState, "retry_scheduled");
 
-    // Schedule retry timer
+    // Schedule shared retry timer
     const delay = retryAt - Date.now();
-    const requestKey = state.requestKey;
-    if (requestKey) {
-      state.retryTimer = setTimeout(() => {
-        this.allTimers.delete(state.retryTimer!);
-        state.retryTimer = null;
-        this.executeRetry(dest, requestKey);
+    if (delay > 0) {
+      requestState.retryTimer = setTimeout(() => {
+        this.allTimers.delete(requestState.retryTimer!);
+        requestState.retryTimer = null;
+        // Execute retry for all destinations with this key
+        for (const d of requestState.destinations) {
+          const dCtx = d.getContext();
+          if (dCtx) {
+            this.executeRetry(dCtx, requestKey);
+          }
+        }
       }, delay);
-      this.allTimers.add(state.retryTimer);
+      this.allTimers.add(requestState.retryTimer);
     }
   }
 
@@ -568,10 +858,11 @@ export abstract class BaseAsyncTap extends BaseTap {
    */
   private executeRetry(dest: GripContext, requestKey: string): void {
     const state = this.getDestState(dest);
+    const destination = this.getDestination(dest);
 
-    // Check if listeners still exist
-    if (state.listenerCount === 0) {
-      // No listeners, cancel retry
+    // Check if destination still exists
+    if (!destination) {
+      // No destination, cancel retry
       state.currentState = { ...state.currentState, retryAt: null };
       this.publishState(dest);
       return;
@@ -656,14 +947,20 @@ export abstract class BaseAsyncTap extends BaseTap {
   /**
    * Schedule TTL-based refresh.
    * Only schedules if listeners exist and TTL is configured.
+   * Uses shared request state for timers.
    */
   private scheduleRefresh(dest: GripContext): void {
-    const state = this.getDestState(dest);
+    const destination = this.getDestination(dest);
+    if (!destination) return;
 
-    // Don't schedule if no listeners
-    if (state.listenerCount === 0) {
-      return;
-    }
+    const state = this.getDestState(dest);
+    const requestKey = state.requestKey;
+    if (!requestKey) return;
+
+    const requestState = this.getOrCreateRequestState(requestKey);
+    requestState.destinations.add(destination);
+    
+    // If destinations exist in the set, they have listeners (destinations only exist when they have output Grips)
 
     // Don't schedule if no TTL configured
     if (this.asyncOpts.cacheTtlMs <= 0) {
@@ -682,11 +979,12 @@ export abstract class BaseAsyncTap extends BaseTap {
       return; // No data, no refresh to schedule
     }
 
-    // Cancel any existing refresh timer
-    if (state.refreshTimer) {
-      clearTimeout(state.refreshTimer);
-      this.allTimers.delete(state.refreshTimer);
-      state.refreshTimer = null;
+    // Use shared refresh timer
+    // Cancel existing timer if any
+    if (requestState.refreshTimer) {
+      clearTimeout(requestState.refreshTimer);
+      this.allTimers.delete(requestState.refreshTimer);
+      requestState.refreshTimer = null;
     }
 
     // Calculate refresh time
@@ -699,16 +997,21 @@ export abstract class BaseAsyncTap extends BaseTap {
       return; // No refresh needed
     }
 
-    // Schedule refresh timer
+    // Schedule shared refresh timer
     const delay = refreshAt - Date.now();
-    const requestKey = state.requestKey;
-    if (requestKey && delay > 0) {
-      state.refreshTimer = setTimeout(() => {
-        this.allTimers.delete(state.refreshTimer!);
-        state.refreshTimer = null;
-        this.executeRefresh(dest, requestKey);
+    if (delay > 0) {
+      requestState.refreshTimer = setTimeout(() => {
+        this.allTimers.delete(requestState.refreshTimer!);
+        requestState.refreshTimer = null;
+        // Execute refresh for all destinations with this key
+        for (const d of requestState.destinations) {
+          const dCtx = d.getContext();
+          if (dCtx) {
+            this.executeRefresh(dCtx, requestKey);
+          }
+        }
       }, delay);
-      this.allTimers.add(state.refreshTimer);
+      this.allTimers.add(requestState.refreshTimer);
     }
   }
 
@@ -718,10 +1021,11 @@ export abstract class BaseAsyncTap extends BaseTap {
    */
   private executeRefresh(dest: GripContext, requestKey: string): void {
     const state = this.getDestState(dest);
+    const destination = this.getDestination(dest);
 
-    // Check if listeners still exist
-    if (state.listenerCount === 0) {
-      // No listeners, cancel refresh
+    // Check if destination still exists
+    if (!destination) {
+      // No destination, cancel refresh
       return;
     }
 
@@ -758,6 +1062,8 @@ export abstract class BaseAsyncTap extends BaseTap {
     newKey: string | null,
   ): void {
     const state = this.getDestState(dest);
+    const destination = this.getDestination(dest);
+    if (!destination) return;
 
     // Guard against recursion: if keys already match, no change needed
     const currentKey = state.key ?? state.requestKey ?? null;
@@ -765,30 +1071,52 @@ export abstract class BaseAsyncTap extends BaseTap {
       return;
     }
 
-    // Cancel old retry/refresh timers
-    if (state.retryTimer) {
-      clearTimeout(state.retryTimer);
-      this.allTimers.delete(state.retryTimer);
-      state.retryTimer = null;
-    }
-    if (state.refreshTimer) {
-      clearTimeout(state.refreshTimer);
-      this.allTimers.delete(state.refreshTimer);
-      state.refreshTimer = null;
+    // 1. Remove destination from old request state
+    if (oldKey) {
+      const oldRequestState = this.requestStates.get(oldKey);
+      if (oldRequestState) {
+        oldRequestState.destinations.delete(destination);
+        // Schedule cleanup if no more destinations
+        if (oldRequestState.destinations.size === 0) {
+          this.scheduleRequestStateCleanup(oldKey, oldRequestState);
+        }
+      }
     }
 
-    // Abort any in-flight request for old key
+    // 2. Abort in-flight request for old key (if no other destinations using it)
     if (state.abortController) {
-      state.abortController.abort();
+      const oldRequestState = this.requestStates.get(oldKey);
+      const otherDestinationsUsingOldKey = oldRequestState
+        ? Array.from(oldRequestState.destinations).filter(d => d !== destination)
+        : [];
+      
+      if (otherDestinationsUsingOldKey.length === 0) {
+        // No other destinations using old key - safe to abort
+        state.abortController.abort();
+        this.allControllers.delete(state.abortController);
+        this.pending.delete(oldKey);
+      }
+      // If other destinations are using old key, don't abort (they need the request)
+      
       state.abortController = undefined;
     }
 
-    // Reset retry attempt counter for new key
-    state.retryAttempt = 0;
-
-    // Update both key and requestKey to prevent recursion
+    // 3. Update destState.requestKey
     state.key = newKey ?? undefined;
     state.requestKey = newKey;
+
+    // 4. Add destination to new request state
+    if (newKey) {
+      const newRequestState = this.getOrCreateRequestState(newKey);
+      // Cancel cleanup if it was scheduled
+      if (newRequestState.cleanupTimer) {
+        clearTimeout(newRequestState.cleanupTimer);
+        this.allTimers.delete(newRequestState.cleanupTimer);
+        newRequestState.cleanupTimer = null;
+      }
+      // Add destination to new request state
+      newRequestState.destinations.add(destination);
+    }
 
     // Add history entry for key change (preserve history, mark with new key)
     this.addHistoryEntry(
@@ -824,9 +1152,9 @@ export abstract class BaseAsyncTap extends BaseTap {
    * Only output Grips count toward listenerCount for retry/refresh scheduling.
    */
   private isOutputGrip(grip: Grip<any>): boolean {
-    // State and controller Grips don't count as listeners
+    // State and controller Grips are considered output Grips
     if (grip === this.stateGrip || grip === this.controllerGrip) {
-      return false;
+      return true;
     }
     // Output Grips are in the provides array (data Grips)
     return this.provides.includes(grip);
@@ -882,27 +1210,12 @@ export abstract class BaseAsyncTap extends BaseTap {
       super.onConnect(dest, grip);
     }
 
-    // Phase 3: Track listeners - only output Grips count
-    // Note: In GRIP, onConnect is called when a destination is first created.
-    // The Destination record contains all grips for this destination context.
-    // We count only output Grips (not state or controller Grips) as listeners.
+    // Context is automatically created via Destination constructor
+    // Track per-request-key and add destination to shared request state
     const state = this.getDestState(dest);
     const destination = this.getDestination(dest);
-    if (destination) {
-      // Count output Grips in this destination
-      let outputGripCount = 0;
-      for (const g of destination.getGrips()) {
-        if (this.isOutputGrip(g)) {
-          outputGripCount++;
-        }
-      }
-      state.listenerCount = outputGripCount;
-    } else {
-      // Destination doesn't exist yet (shouldn't happen in onConnect, but handle it)
-      state.listenerCount = 0;
-    }
+    if (!destination) return;
 
-    // Track per-request-key
     const params = this.getDestinationParams(dest);
     if (params) {
       const key = this.getRequestKey(params);
@@ -915,11 +1228,21 @@ export abstract class BaseAsyncTap extends BaseTap {
           // Update both key and requestKey
           state.key = key;
           state.requestKey = key;
+          
+          // Add destination to shared request state
+          const requestState = this.getOrCreateRequestState(key);
+          // Cancel cleanup if it was scheduled
+          if (requestState.cleanupTimer) {
+            clearTimeout(requestState.cleanupTimer);
+            this.allTimers.delete(requestState.cleanupTimer);
+            requestState.cleanupTimer = null;
+          }
+          requestState.destinations.add(destination);
         }
       }
     }
 
-    // Phase 8: Create controller if controller Grip is provided
+    // Create controller if controller Grip is provided
     if (this.controllerGrip && !state.tapController) {
       state.tapController = this.createController(dest);
       this.publishController(dest);
@@ -927,86 +1250,34 @@ export abstract class BaseAsyncTap extends BaseTap {
 
     this.publishState(dest);
 
-    // Phase 2: Publish initial state when destination connects (after listener count is updated)
+    // Publish initial state when destination connects (after listener count is updated)
     this.publishState(dest);
     this.kickoff(dest);
   }
 
   /**
    * Clean up destination state on disconnect.
-   *
-   * Aborts in-flight requests and clears timers.
+   * Simplified - callbacks handle the logic.
    */
   onDisconnect(dest: GripContext, grip: Grip<any>): void {
-    try {
-      // Call super first to remove the grip from destination
-      super.onDisconnect(dest, grip);
-
-      const s = this.destState.get(dest);
-      if (s) {
-        // Phase 3: Track listeners - only output Grips count
-        // Recalculate listener count based on remaining output Grips in destination
-        const isOutputGrip = this.isOutputGrip(grip);
-        if (isOutputGrip) {
-          const destination = this.getDestination(dest);
-          if (destination) {
-            // Recalculate based on remaining Grips (grip has been removed by super.onDisconnect)
-            let outputGripCount = 0;
-            for (const g of destination.getGrips()) {
-              if (this.isOutputGrip(g)) {
-                outputGripCount++;
-              }
-            }
-            s.listenerCount = outputGripCount;
-          } else {
-            // Destination removed - no listeners
-            s.listenerCount = 0;
-          }
-
-          // Phase 3: Zero-listener behavior - cancel retries and TTL refreshes
-          if (s.listenerCount === 0) {
-            // Cancel retry timer (will be implemented in Phase 4)
-            if (s.retryTimer) {
-              clearTimeout(s.retryTimer);
-              this.allTimers.delete(s.retryTimer);
-              s.retryTimer = null;
-            }
-            // Cancel refresh timer (will be implemented in Phase 5)
-            if (s.refreshTimer) {
-              clearTimeout(s.refreshTimer);
-              this.allTimers.delete(s.refreshTimer);
-              s.refreshTimer = null;
-            }
-            // Clear retryAt in state
-            s.currentState = { ...s.currentState, retryAt: null };
-            // Phase 8: Clear controller (make no-op) when listeners drop to zero
-            if (this.controllerGrip && s.tapController) {
-              s.tapController = undefined;
-              this.publishController(dest);
-            }
-          }
-        }
-
-        if (s.abortController) {
-          s.abortController.abort();
-          this.allControllers.delete(s.abortController);
-          s.abortController = undefined;
-        }
-        if (s.deadlineTimer) {
-          clearTimeout(s.deadlineTimer);
-          this.allTimers.delete(s.deadlineTimer);
-          s.deadlineTimer = undefined;
-        }
-
-        // Phase 3: Publish updated state with listener count
-        this.publishState(dest);
-
-        // Only delete state if destination is removed (will be handled in later phases)
-        // For now, keep state for debugging
-      }
-    } catch (error) {
-      // Ignore errors during disconnect
+    // Call super first - this will trigger dripRemoved callback
+    // The dripRemoved callback handles:
+    // - Checking if this was the last output grip
+    // - Removing from shared request state if no listeners
+    // - Clearing retryAt and controller
+    // - Publishing state updates
+    super.onDisconnect(dest, grip);
+    
+    // Handle deadline timer cleanup (per-destination, not shared)
+    const state = this.getDestState(dest);
+    if (state.deadlineTimer) {
+      clearTimeout(state.deadlineTimer);
+      this.allTimers.delete(state.deadlineTimer);
+      state.deadlineTimer = undefined;
     }
+    
+    // Note: Abort controller cleanup is handled in onDetach callback
+    // when all grips are removed
   }
 
   /**
@@ -1069,21 +1340,32 @@ export abstract class BaseAsyncTap extends BaseTap {
       return;
     }
 
-    // Phase 10: Request key changed - handle state transition
+    // Request key changed - handle state transition
+    const destination = this.getDestination(dest);
+    if (!destination) return;
+    
     if (prevKey !== undefined && prevKey !== key) {
       this.handleRequestKeyChange(dest, prevKey, key);
-      // handleRequestKeyChange already updates requestKey, so return early
+      // handleRequestKeyChange already updates requestKey and adds to shared state, so return early
       return;
     } else {
+      // Update requestKey and add to shared request state
       state.requestKey = key;
+      const requestState = this.getOrCreateRequestState(key);
+      // Cancel cleanup if it was scheduled
+      if (requestState.cleanupTimer) {
+        clearTimeout(requestState.cleanupTimer);
+        this.allTimers.delete(requestState.cleanupTimer);
+        requestState.cleanupTimer = null;
+      }
+      requestState.destinations.add(destination);
     }
 
     // Check cache first
     const cached = this.asyncOpts.cacheTtlMs > 0 && !forceRefetch ? this.cache.get(key) : undefined;
     if (cached) {
-      // Phase 2: Cache hit - transition to stale-while-revalidate if refresh initiated, otherwise success
+      // Cache hit - transition to stale-while-revalidate if refresh initiated, otherwise success
       // For now, if we have cached data and are initiating a request, use stale-while-revalidate
-      // This will be refined when TTL refresh is implemented in Phase 5
       const hasData = state.currentState.type === "success" ||
         state.currentState.type === "stale-while-revalidate" ||
         state.currentState.type === "stale-with-error";
@@ -1186,7 +1468,7 @@ export abstract class BaseAsyncTap extends BaseTap {
       return;
     }
 
-    // Phase 2: Start new request - transition to loading or stale-while-revalidate
+    // Start new request - transition to loading or stale-while-revalidate
     state.seq += 1;
     const seq = state.seq;
     if (state.controller) state.controller.abort();
@@ -1196,11 +1478,11 @@ export abstract class BaseAsyncTap extends BaseTap {
     }
     const controller = new AbortController();
     state.controller = controller; // Keep for backward compatibility
-    state.abortController = controller; // Phase 2: Dedicated AbortController
+    state.abortController = controller; // Dedicated AbortController
     this.allControllers.add(controller);
     state.key = key;
 
-    // Phase 2: Determine initial state - loading (no data) or stale-while-revalidate (has data)
+    // Determine initial state - loading (no data) or stale-while-revalidate (has data)
     const hasData = state.currentState.type === "success" ||
       state.currentState.type === "stale-while-revalidate" ||
       state.currentState.type === "stale-with-error";
@@ -1260,7 +1542,7 @@ export abstract class BaseAsyncTap extends BaseTap {
         if (this.asyncOpts.cacheTtlMs > 0 && key)
           this.cache.set(key, result, this.asyncOpts.cacheTtlMs);
 
-        // Phase 2: Collect destinations to update state for
+        // Collect destinations to update state for
         const retrievedAt = Date.now();
         const destinationsToUpdate: GripContext[] = [];
         if (this.producer) {
@@ -1314,16 +1596,15 @@ export abstract class BaseAsyncTap extends BaseTap {
           } catch {}
         }
 
-        // Phase 2: Transition to success state for all destinations with this key (after data is published)
+        // Transition to success state for all destinations with this key (after data is published)
         for (const dctx of destinationsToUpdate) {
           const dstate = this.getDestState(dctx);
-          // Phase 4: Reset retry attempt counter on success
-          dstate.retryAttempt = 0;
-          // Cancel any scheduled retries (success means no retry needed)
-          if (dstate.retryTimer) {
-            clearTimeout(dstate.retryTimer);
-            this.allTimers.delete(dstate.retryTimer);
-            dstate.retryTimer = null;
+          // Reset shared retry attempt counter on success
+          if (key) {
+            const requestState = this.requestStates.get(key);
+            if (requestState) {
+              requestState.retryAttempt = 0;
+            }
           }
           this.addHistoryEntry(
             dctx,
@@ -1334,13 +1615,13 @@ export abstract class BaseAsyncTap extends BaseTap {
             },
             "fetch_success",
           );
-          // Phase 5: Schedule TTL refresh if configured and listeners exist
+          // Schedule TTL refresh if configured and listeners exist
           this.publishState(dctx);
           this.scheduleRefresh(dctx);
         }
       })
       .catch((error) => {
-        // Phase 2: Handle errors - transition to error or stale-with-error
+        // Handle errors - transition to error or stale-with-error
         if (!this.producer) return;
         
         const failedAt = Date.now();
@@ -1392,9 +1673,9 @@ export abstract class BaseAsyncTap extends BaseTap {
             );
           }
 
-          // Phase 4: Ensure state is published before scheduling retry (so listener count is up to date)
+          // Ensure state is published before scheduling retry (so listener count is up to date)
           this.publishState(dctx);
-          // Phase 4: Schedule retry if configured and listeners exist
+          // Schedule retry if configured and listeners exist
           this.scheduleRetry(dctx);
         }
         // Swallow network errors; optionally map to diagnostics in subclass
@@ -1422,7 +1703,7 @@ export interface AsyncValueTapConfig<T> extends BaseAsyncTapOptions {
   homeParamGrips?: readonly Grip<any>[];
   requestKeyOf: (params: DestinationParams) => string | undefined;
   fetcher: (params: DestinationParams, signal: AbortSignal) => Promise<T>;
-  // Phase 0: Optional state and controller Grips
+  // Optional state and controller Grips
   stateGrip?: Grip<AsyncRequestState>;
   controllerGrip?: Grip<AsyncTapController>;
 }
@@ -1439,7 +1720,7 @@ export interface AsyncHomeValueTapConfig<T> extends BaseAsyncTapOptions {
   homeParamGrips?: readonly Grip<any>[];
   requestKeyOf: (homeParams: ReadonlyMap<Grip<any>, any>) => string | undefined;
   fetcher: (homeParams: ReadonlyMap<Grip<any>, any>, signal: AbortSignal) => Promise<T>;
-  // Phase 0: Optional state and controller Grips
+  // Optional state and controller Grips
   stateGrip?: Grip<AsyncRequestState>;
   controllerGrip?: Grip<AsyncTapController>;
 }
@@ -1460,7 +1741,7 @@ class SingleOutputAsyncTap<T> extends BaseAsyncTap {
       destinationParamGrips: cfg.destinationParamGrips,
       homeParamGrips: cfg.homeParamGrips,
       async: cfg,
-      // Phase 0: Pass state and controller Grips
+      // Pass state and controller Grips
       stateGrip: cfg.stateGrip,
       controllerGrip: cfg.controllerGrip,
     });
@@ -1515,7 +1796,7 @@ class SingleOutputHomeAsyncTap<T> extends BaseAsyncTap {
       provides: [cfg.provides],
       homeParamGrips: cfg.homeParamGrips,
       async: cfg,
-      // Phase 0: Pass state and controller Grips
+      // Pass state and controller Grips
       stateGrip: cfg.stateGrip,
       controllerGrip: cfg.controllerGrip,
     });
@@ -1583,7 +1864,7 @@ export interface AsyncMultiTapConfig<
     result: R,
     getState: <K extends keyof StateRec>(grip: StateRec[K]) => GripValue<StateRec[K]> | undefined,
   ) => ReadonlyMap<Values<Outs>, GripValue<Values<Outs>>>;
-  // Phase 0: Optional state and controller Grips
+  // Optional state and controller Grips
   stateGrip?: Grip<AsyncRequestState>;
   controllerGrip?: Grip<AsyncTapController>;
 }
@@ -1618,7 +1899,7 @@ export interface AsyncHomeMultiTapConfig<
     result: R,
     getState: <K extends keyof StateRec>(grip: StateRec[K]) => GripValue<StateRec[K]> | undefined,
   ) => ReadonlyMap<Values<Outs>, GripValue<Values<Outs>>>;
-  // Phase 0: Optional state and controller Grips
+  // Optional state and controller Grips
   stateGrip?: Grip<AsyncRequestState>;
   controllerGrip?: Grip<AsyncTapController>;
 }
@@ -1660,7 +1941,7 @@ class MultiOutputAsyncTap<Outs extends GripRecord, R, StateRec extends GripRecor
       destinationParamGrips: cfg.destinationParamGrips,
       homeParamGrips: cfg.homeParamGrips,
       async: cfg,
-      // Phase 0: Pass state and controller Grips
+      // Pass state and controller Grips
       stateGrip: cfg.stateGrip,
       controllerGrip: cfg.controllerGrip,
     });
@@ -1772,7 +2053,7 @@ class MultiOutputHomeAsyncTap<Outs extends GripRecord, R, StateRec extends GripR
       provides: providesList,
       homeParamGrips: cfg.homeParamGrips,
       async: cfg,
-      // Phase 0: Pass state and controller Grips
+      // Pass state and controller Grips
       stateGrip: cfg.stateGrip,
       controllerGrip: cfg.controllerGrip,
     });
