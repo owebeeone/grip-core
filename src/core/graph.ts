@@ -906,6 +906,7 @@ export class GripContextNode implements GripContextNodeIf {
       // Here we re-use the old drip (for this grip in this context) if it's still being referenced.
       if (oldDrip) {
         drip = oldDrip;
+        oldDrip.reset(ctx, grip.defaultValue as unknown as T | undefined);
       } else {
         drip = new Drip<T>(ctx, grip.defaultValue as unknown as T | undefined);
       }

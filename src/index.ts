@@ -14,6 +14,7 @@ export { Grip, GripRegistry, GripOf } from "./core/grip";
 
 // Contexts
 export type { GripContext, GripContextLike } from "./core/context";
+export { DualContextContainer } from "./core/containers";
 
 // Runtime
 export { Grok } from "./core/grok";
@@ -91,4 +92,18 @@ export {
 } from "./core/async_state_helpers";
 
 // Logging helper
-export { getLoggingTagsGrip } from "./logging";
+export { getLoggingTagsGrip, setupConsola } from "./logging";
+
+// Internal utilities (exported for testing and advanced use cases)
+export { SimpleResolver } from "./core/tap_resolver";
+export { TapMatcher, MatchingContext } from "./core/matcher";
+export {
+  QueryEvaluator,
+  QueryBinding,
+  TapAttribution,
+  AddBindingResult,
+  RemoveBindingResult,
+  evaluationToString,
+} from "./core/query_evaluator";
+export { DisjointSetPartitioner, TupleMap, createCompositeKey } from "./core/query_utils";
+export { TaskQueue, TaskHandleHolder, TaskHandle, TaskHandleContainer } from "./core/task_queue";

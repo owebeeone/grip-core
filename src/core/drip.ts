@@ -57,6 +57,20 @@ export class Drip<T> {
   private zeroCheckScheduled = false;
 
   /**
+   * Resets the Drip to its initial state.
+   */
+  reset(context: GripContext, initial: T | undefined): void {
+    this.context = context; // In theory this should never change, but just in case.
+    this.value = initial;
+    this.subs.clear();
+    this.immediateSubs.clear();
+    this.firstSubCallbacks.clear();
+    this.zeroSubCallbacks.clear();
+    this.enqueued = false;
+    this.zeroCheckScheduled = false;
+  }
+
+  /**
    * Creates a new Drip instance.
    *
    * @param context - The GripContext this Drip belongs to

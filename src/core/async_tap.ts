@@ -191,17 +191,18 @@ export abstract class BaseAsyncTap extends BaseTap {
   /**
    * Get or create destination state for async operations.
    * State is now stored in Destination.tapContext, not WeakMap.
+   * Returns undefined if destination was unregistered (can be safely ignored).
    */
-  protected getDestState(dest: GripContext): DestState {
+  protected getDestState(dest: GripContext): DestState | undefined {
     const destination = this.getDestination(dest);
     if (!destination) {
-      throw new Error('Destination not found for context');
+      return undefined;
     }
     
     // Get context directly from Destination (stored on destination.tapContext)
     const context = destination.getTapContext() as (TapDestinationContext & { destState: DestState }) | undefined;
     if (!context) {
-      throw new Error('Destination context not found - this should not happen');
+      return undefined;
     }
     
     return context.destState;
@@ -491,6 +492,16 @@ export abstract class BaseAsyncTap extends BaseTap {
     const state = this.getDestState(dest);
     const destination = this.getDestination(dest);
     
+    if (!state) {
+      // Destination was unregistered, return idle state
+      return {
+        state: { type: "idle", retryAt: null },
+        requestKey: null,
+        hasListeners: false,
+        history: [],
+      };
+    }
+    
     return {
       state: state.currentState,
       requestKey: state.requestKey ?? null,
@@ -518,6 +529,7 @@ export abstract class BaseAsyncTap extends BaseTap {
    */
   protected reset(dest: GripContext): void {
     const state = this.getDestState(dest);
+    if (!state) return;
 
     // Abort any in-flight request
     if (state.abortController) {
@@ -575,6 +587,7 @@ export abstract class BaseAsyncTap extends BaseTap {
    */
   protected cancelRetry(dest: GripContext): void {
     const state = this.getDestState(dest);
+    if (!state) return;
 
     // Clear retryAt in state
     if (state.currentState.retryAt !== null) {
@@ -609,6 +622,7 @@ export abstract class BaseAsyncTap extends BaseTap {
     }
 
     const state = this.getDestState(dest);
+    if (!state) return;
     const controller = state.tapController || this.createNoOpController();
 
     const updates = new Map<Grip<any>, any>([[this.controllerGrip, controller]]);
@@ -623,6 +637,7 @@ export abstract class BaseAsyncTap extends BaseTap {
     return {
       retry: (forceRefetch?: boolean) => {
         const state = this.getDestState(dest);
+        if (!state) return;
 
         // Abort any in-flight request
         if (state.abortController) {
@@ -661,6 +676,7 @@ export abstract class BaseAsyncTap extends BaseTap {
         // Refresh doesn't increment retryAttempt
         // Abort any in-flight request
         const state = this.getDestState(dest);
+        if (!state) return;
         if (state.abortController) {
           state.abortController.abort();
           state.abortController = undefined;
@@ -698,6 +714,7 @@ export abstract class BaseAsyncTap extends BaseTap {
       },
       abort: () => {
         const state = this.getDestState(dest);
+        if (!state) return;
         if (state.abortController) {
           state.abortController.abort();
           state.abortController = undefined;
@@ -729,6 +746,7 @@ export abstract class BaseAsyncTap extends BaseTap {
     reason?: string,
   ): void {
     const state = this.getDestState(dest);
+    if (!state) return;
 
     if (state.historySize === 0) {
       // History disabled, just update current state
@@ -799,6 +817,7 @@ export abstract class BaseAsyncTap extends BaseTap {
     if (!destination) return;
 
     const state = this.getDestState(dest);
+    if (!state) return;
     const requestKey = state.requestKey;
     if (!requestKey) return;
 
@@ -860,6 +879,7 @@ export abstract class BaseAsyncTap extends BaseTap {
    */
   private executeRetry(dest: GripContext, requestKey: string): void {
     const state = this.getDestState(dest);
+    if (!state) return;
     const destination = this.getDestination(dest);
 
     // Check if destination still exists
@@ -956,6 +976,7 @@ export abstract class BaseAsyncTap extends BaseTap {
     if (!destination) return;
 
     const state = this.getDestState(dest);
+    if (!state) return;
     const requestKey = state.requestKey;
     if (!requestKey) return;
 
@@ -1023,6 +1044,7 @@ export abstract class BaseAsyncTap extends BaseTap {
    */
   private executeRefresh(dest: GripContext, requestKey: string): void {
     const state = this.getDestState(dest);
+    if (!state) return;
     const destination = this.getDestination(dest);
 
     // Check if destination still exists
@@ -1064,6 +1086,7 @@ export abstract class BaseAsyncTap extends BaseTap {
     newKey: string | null,
   ): void {
     const state = this.getDestState(dest);
+    if (!state) return;
     const destination = this.getDestination(dest);
     if (!destination) return;
 
@@ -1226,6 +1249,7 @@ export abstract class BaseAsyncTap extends BaseTap {
     
     // Get the state's request key from destState
     const destState = this.getDestState(dest);
+    if (!destState) return false;
     const stateRequestKey = destState.requestKey;
 
     // If current request key is undefined, data is not ready
@@ -1298,6 +1322,7 @@ export abstract class BaseAsyncTap extends BaseTap {
         // Single destination
         const params = this.getDestinationParams(opts.destContext);
         const state = this.getDestState(opts.destContext);
+        if (!state) return;
 
         // Check 1: Are all input parameters defined?
         if (!this.allParamsDefined(params)) {
@@ -1331,6 +1356,7 @@ export abstract class BaseAsyncTap extends BaseTap {
 
           const params = this.getDestinationParams(destCtx);
           const state = this.getDestState(destCtx);
+          if (!state) continue;
 
           // Check 1: Are all input parameters defined?
           if (!this.allParamsDefined(params)) {
@@ -1393,6 +1419,7 @@ export abstract class BaseAsyncTap extends BaseTap {
     // Context is automatically created via Destination constructor
     // Track per-request-key and add destination to shared request state
     const state = this.getDestState(dest);
+    if (!state) return;
     const destination = this.getDestination(dest);
     if (!destination) return;
 
@@ -1450,6 +1477,7 @@ export abstract class BaseAsyncTap extends BaseTap {
     
     // Handle deadline timer cleanup (per-destination, not shared)
     const state = this.getDestState(dest);
+    if (!state) return;
     if (state.deadlineTimer) {
       clearTimeout(state.deadlineTimer);
       this.allTimers.delete(state.deadlineTimer);
@@ -1496,6 +1524,7 @@ export abstract class BaseAsyncTap extends BaseTap {
    */
   private kickoff(dest: GripContext, forceRefetch?: boolean): void {
     const state = this.getDestState(dest);
+    if (!state) return;
     const prevKey = state.key ?? state.requestKey ?? undefined;
 
     const params = this.getDestinationParams(dest);
@@ -1599,11 +1628,11 @@ export abstract class BaseAsyncTap extends BaseTap {
         const updates = this.mapResultToUpdates(dparams, cached.value);
         this.publish(updates, dctx);
         // Mark destination state to prevent repeated resets
-        try {
-          const dstate = this.getDestState(dctx);
+        const dstate = this.getDestState(dctx);
+        if (dstate) {
           dstate.key = key;
           dstate.requestKey = key;
-        } catch {}
+        }
       }
       return;
     }
@@ -1635,9 +1664,10 @@ export abstract class BaseAsyncTap extends BaseTap {
               if (k2 !== key) continue;
               const updates = this.mapResultToUpdates(dparams, fromCache.value);
               this.publish(updates, dctx);
-              try {
-                this.getDestState(dctx).key = key;
-              } catch {}
+              const dstate = this.getDestState(dctx);
+              if (dstate) {
+                dstate.key = key;
+              }
             }
           } else if (state.pendingRetryArmed && this.pending.get(key) === undefined) {
             // No cache produced; retry once if destination still targets this key
@@ -1772,16 +1802,17 @@ export abstract class BaseAsyncTap extends BaseTap {
           if (k2 !== key) continue;
           const updates = this.mapResultToUpdates(dparams, result);
           this.publish(updates, dctx);
-          try {
-            const dstate = this.getDestState(dctx);
+          const dstate = this.getDestState(dctx);
+          if (dstate) {
             dstate.key = key;
             dstate.requestKey = key;
-          } catch {}
+          }
         }
 
         // Transition to success state for all destinations with this key (after data is published)
         for (const dctx of destinationsToUpdate) {
           const dstate = this.getDestState(dctx);
+          if (!dstate) continue;
           // Reset shared retry attempt counter on success
           if (key) {
             const requestState = this.requestStates.get(key);
@@ -1817,6 +1848,7 @@ export abstract class BaseAsyncTap extends BaseTap {
           if (k2 !== key) continue;
           
           const dstate = this.getDestState(dctx);
+          if (!dstate) continue;
           const hasData = dstate.currentState.type === "success" ||
             dstate.currentState.type === "stale-while-revalidate" ||
             dstate.currentState.type === "stale-with-error";
