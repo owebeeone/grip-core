@@ -15,7 +15,7 @@
 
 import { Grip } from "./grip";
 import { GripContext } from "./context";
-import type { Tap } from "./tap";
+import type { Tap, TapExecutionMode } from "./tap";
 import { BaseTapNoParams } from "./base_tap";
 
 /**
@@ -75,8 +75,15 @@ export class AtomValueTap<T> extends BaseTapNoParams implements AtomTap<T>, Tap 
    * @param opts - Optional configuration
    * @param opts.handleGrip - Optional Grip for exposing the controller interface
    */
-  constructor(grip: Grip<T>, initial?: T | undefined, opts?: { handleGrip?: Grip<any> }) {
-    super({ provides: opts?.handleGrip ? [grip, opts.handleGrip] : [grip] });
+  constructor(
+    grip: Grip<T>,
+    initial?: T | undefined,
+    opts?: { handleGrip?: Grip<any>; executionMode?: TapExecutionMode },
+  ) {
+    super({
+      provides: opts?.handleGrip ? [grip, opts.handleGrip] : [grip],
+      executionMode: opts?.executionMode ?? "replicated",
+    });
     this.valueGrip = grip;
     this.handleGrip = opts?.handleGrip;
     this.currentValue = initial ?? grip.defaultValue!;
@@ -165,19 +172,19 @@ export class AtomValueTap<T> extends BaseTapNoParams implements AtomTap<T>, Tap 
 // Overload 1: When initial value is provided and is non-nullable, return AtomValueTap with non-nullable type
 export function createAtomValueTap<T>(
   grip: Grip<T | undefined>,
-  opts: { initial: NonNullable<T>; handleGrip?: Grip<any> },
+  opts: { initial: NonNullable<T>; handleGrip?: Grip<any>; executionMode?: TapExecutionMode },
 ): AtomValueTap<NonNullable<T>>;
 
 // Overload 2: Standard case - return AtomValueTap with original grip type
 export function createAtomValueTap<T>(
   grip: Grip<T>,
-  opts?: { initial?: T; handleGrip?: Grip<any> },
+  opts?: { initial?: T; handleGrip?: Grip<any>; executionMode?: TapExecutionMode },
 ): AtomValueTap<T>;
 
 // Implementation
 export function createAtomValueTap<T>(
   grip: Grip<T>,
-  opts?: { initial?: T | undefined; handleGrip?: Grip<any> },
+  opts?: { initial?: T | undefined; handleGrip?: Grip<any>; executionMode?: TapExecutionMode },
 ): AtomValueTap<T> {
   const tap = new AtomValueTap<T>(grip, opts?.initial ?? grip.defaultValue!, opts);
   return tap;
@@ -296,12 +303,12 @@ export class MultiAtomValueTap<Outs extends GripRecord = any>
   constructor(
     grips: ReadonlyArray<Values<Outs>>,
     gripsMap: Map<Values<Outs>, GripValue<Values<Outs>> | undefined> | undefined,
-    opts?: { handleGrip?: Grip<MultiAtomTapHandle<Outs>> },
+    opts?: { handleGrip?: Grip<MultiAtomTapHandle<Outs>>; executionMode?: TapExecutionMode },
   ) {
     const providesList = (opts?.handleGrip
       ? [...grips, opts.handleGrip]
       : grips) as unknown as readonly Grip<any>[];
-    super({ provides: providesList });
+    super({ provides: providesList, executionMode: opts?.executionMode ?? "replicated" });
     this.valueGrips = grips;
     this.handleGrip = opts?.handleGrip as unknown as Grip<MultiAtomTapHandle<Outs>> | undefined;
 
@@ -485,11 +492,13 @@ export function createMultiAtomValueTap<Outs extends GripRecord>(config: {
   grips?: ReadonlyArray<Values<Outs>>;
   gripMap?: Map<Values<Outs>, GripValue<Values<Outs>> | undefined>;
   handleGrip?: Grip<MultiAtomTapHandle<Outs>>;
+  executionMode?: TapExecutionMode;
 }): MultiAtomValueTap<Outs> {
   const resolvedGrips: ReadonlyArray<Values<Outs>> =
     config.grips ?? Array.from(config.gripMap?.keys() ?? []);
   const tap = new MultiAtomValueTap<Outs>(resolvedGrips, config.gripMap, {
     handleGrip: config.handleGrip,
+    executionMode: config.executionMode,
   });
   return tap;
 }

@@ -14,7 +14,7 @@ import { Drip, Unsubscribe } from "./drip";
 import { Grip } from "./grip";
 import type { GripContext, GripContextLike } from "./context";
 import type { Grok } from "./grok";
-import type { Tap } from "./tap";
+import type { Tap, TapExecutionMode, TapExecutionRole } from "./tap";
 import type { GripContextNode, Destination, ProducerRecord, DestinationParams } from "./graph";
 import { consola } from "./logger";
 
@@ -32,6 +32,8 @@ const logger = consola.withTag("core/base_tap.ts");
 export abstract class BaseTap implements Tap {
   readonly kind: "Tap" = "Tap";
   readonly id: string = `tap_${Math.random().toString(36).substr(2, 9)}`;
+  private readonly executionMode: TapExecutionMode;
+  private executionRole: TapExecutionRole;
 
   protected engine?: Grok;
   readonly provides: readonly Grip<any>[]; // Grips this tap publishes
@@ -49,10 +51,13 @@ export abstract class BaseTap implements Tap {
     provides: readonly Grip<any>[];
     destinationParamGrips?: readonly Grip<any>[];
     homeParamGrips?: readonly Grip<any>[];
+    executionMode?: TapExecutionMode;
   }) {
     this.provides = opts.provides;
     this.destinationParamGrips = opts.destinationParamGrips;
     this.homeParamGrips = opts.homeParamGrips;
+    this.executionMode = opts.executionMode ?? "origin-primary";
+    this.executionRole = this.executionMode === "negotiated-primary" ? "follower" : "primary";
 
     // Validate: can't produce what we consume
     if (opts.destinationParamGrips) {
@@ -66,6 +71,22 @@ export abstract class BaseTap implements Tap {
 
   getHomeContext(): GripContext | undefined {
     return this.homeContext;
+  }
+
+  getExecutionMode(): TapExecutionMode {
+    return this.executionMode;
+  }
+
+  getExecutionRole(): TapExecutionRole {
+    return this.executionRole;
+  }
+
+  setExecutionRole(role: TapExecutionRole): void {
+    this.executionRole = role;
+  }
+
+  protected canExecuteLocally(): boolean {
+    return this.executionMode === "replicated" || this.executionRole === "primary";
   }
 
   getParamsContext(): GripContext | undefined {
@@ -236,7 +257,7 @@ export abstract class BaseTap implements Tap {
    * @returns Number of consumers notified
    */
   protected publish(updates: Map<Grip<any>, any>, target?: GripContext): number {
-    if (!this.engine || !this.homeContext || !this.producer) {
+    if (!this.canExecuteLocally() || !this.engine || !this.homeContext || !this.producer) {
       return 0; // Not fully attached yet
     }
 
@@ -302,8 +323,8 @@ export abstract class BaseTap implements Tap {
  * Throws on parameter change callbacks since they shouldn't be called.
  */
 export abstract class BaseTapNoParams extends BaseTap {
-  constructor(opts: { provides: readonly Grip<any>[] }) {
-    super({ provides: opts.provides });
+  constructor(opts: { provides: readonly Grip<any>[]; executionMode?: TapExecutionMode }) {
+    super({ provides: opts.provides, executionMode: opts.executionMode });
   }
 
   /**

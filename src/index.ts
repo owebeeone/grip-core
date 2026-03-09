@@ -26,7 +26,7 @@ export type { GripContextNode, DestinationParams, HomeParams } from "./core/grap
 export { Drip } from "./core/drip";
 
 // Taps
-export type { Tap, TapFactory } from "./core/tap";
+export type { Tap, TapFactory, TapExecutionMode, TapExecutionRole } from "./core/tap";
 export { BaseTap, BaseTapNoParams } from "./core/base_tap";
 export {
   AtomTap,

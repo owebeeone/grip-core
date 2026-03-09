@@ -74,6 +74,7 @@ export class Grok {
 
   /** Task queue for scheduling and executing asynchronous operations */
   private taskQueue = new TaskQueue();
+  private originMutationSeq = 0;
 
   /** Root context with no parents, serves as the top-level scope */
   readonly rootContext: GripContext;
@@ -114,6 +115,15 @@ export class Grok {
 
   getRegistry(): GripRegistry {
     return this.registry;
+  }
+
+  allocateOriginMutationSeq(): number {
+    this.originMutationSeq += 1;
+    return this.originMutationSeq;
+  }
+
+  getLastOriginMutationSeq(): number {
+    return this.originMutationSeq;
   }
 
   /**

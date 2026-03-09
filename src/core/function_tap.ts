@@ -23,7 +23,7 @@
 
 import { Grip } from "./grip";
 import { GripContext } from "./context";
-import type { Tap } from "./tap";
+import type { Tap, TapExecutionMode } from "./tap";
 import { BaseTap } from "./base_tap";
 
 // Type helpers for type-safe grips
@@ -155,6 +155,9 @@ export interface FunctionTapConfig<
   /** Optional Grip for exposing the state management handle */
   handleGrip?: Grip<FunctionTapHandle<StateRec>>;
 
+  /** Optional execution mode override for shared-session coordination. */
+  executionMode?: TapExecutionMode;
+
   /**
    * Grips that represent state keys. When present in the compute() result map,
    * their values are applied to internal state instead of being published.
@@ -197,6 +200,7 @@ export class FunctionTap<
         : config.provides) as unknown as readonly Grip<any>[],
       destinationParamGrips: config.destinationParamGrips as unknown as readonly Grip<any>[],
       homeParamGrips: config.homeParamGrips as unknown as readonly Grip<any>[],
+      executionMode: config.executionMode,
     });
     this.computeFn = config.compute;
     this.handleGrip = config.handleGrip as unknown as Grip<FunctionTapHandle<StateRec>> | undefined;
@@ -230,6 +234,7 @@ export class FunctionTap<
     grip: StateRec[K],
     value: GripValue<StateRec[K]> | undefined,
   ): void {
+    if (!this.canExecuteLocally()) return;
     const prev = this.state.get(grip as unknown as Grip<any>);
     if (prev === value) return;
     this.state.set(grip as unknown as Grip<any>, value);
@@ -296,6 +301,7 @@ export class FunctionTap<
 
   // Publish current state for all known destinations or a specific one
   produce(opts?: { destContext?: GripContext }): void {
+    if (!this.canExecuteLocally()) return;
     if (opts?.destContext) {
       const updates = this.computeFor(opts.destContext);
       this.publish(updates, opts.destContext);

@@ -19,6 +19,9 @@ import { Drip } from "./drip";
 import type { Grok } from "./grok";
 import type { GripContextLike } from "./context";
 
+export type TapExecutionMode = "replicated" | "origin-primary" | "negotiated-primary";
+export type TapExecutionRole = "primary" | "follower";
+
 /**
  * Tap represents a data producer that can provide one or more Grips.
  *
@@ -35,6 +38,7 @@ import type { GripContextLike } from "./context";
  */
 export interface Tap {
   readonly kind: "Tap";
+  readonly id?: string;
 
   /** The Grips this Tap can provide */
   provides: readonly Grip<any>[];
@@ -44,6 +48,15 @@ export interface Tap {
 
   /** Parameters read from the home (provider) context lineage (affect all destinations under the provider) */
   homeParamGrips?: readonly Grip<any>[];
+
+  /** Returns how this tap should execute across replicas. */
+  getExecutionMode(): TapExecutionMode;
+
+  /** Returns the local runtime role for this tap. */
+  getExecutionRole(): TapExecutionRole;
+
+  /** Updates the local runtime role for this tap. */
+  setExecutionRole(role: TapExecutionRole): void;
 
   /**
    * Called when the Tap is attached to a home context.

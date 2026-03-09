@@ -1316,6 +1316,7 @@ export abstract class BaseAsyncTap extends BaseTap {
    * @param opts.forceRefetch - Bypass cache and force new request
    */
   produce(opts?: { destContext?: GripContext; forceRefetch?: boolean }): void {
+    if (!this.canExecuteLocally()) return;
     // Default behavior: output undefined when not ready (unless keepStaleDataOnTransition is true)
     if (!this.asyncOpts.keepStaleDataOnTransition) {
       if (opts?.destContext) {
@@ -1523,6 +1524,7 @@ export abstract class BaseAsyncTap extends BaseTap {
    * - Result publishing to all matching destinations
    */
   private kickoff(dest: GripContext, forceRefetch?: boolean): void {
+    if (!this.canExecuteLocally()) return;
     const state = this.getDestState(dest);
     if (!state) return;
     const prevKey = state.key ?? state.requestKey ?? undefined;

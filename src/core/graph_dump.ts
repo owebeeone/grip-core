@@ -48,6 +48,8 @@ export interface GraphDumpNodeTap {
   key: string;
   type: "Tap";
   class: string;
+  executionMode?: string;
+  executionRole?: string;
   providesGrips: string[];
   publisherContext: string;
   destinations: GraphDumpTapDestination[];
@@ -287,6 +289,8 @@ export class GripGraphDumper {
       key,
       type: "Tap",
       class: className,
+      executionMode: (tap as any).getExecutionMode?.(),
+      executionRole: (tap as any).getExecutionRole?.(),
       providesGrips,
       publisherContext,
       destinations,
