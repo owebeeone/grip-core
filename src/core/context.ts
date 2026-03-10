@@ -24,6 +24,22 @@ import { Grok } from "./grok";
  */
 type Override = { type: "value"; value: unknown } | { type: "drip"; drip: Drip<any> };
 
+const CONTEXT_CHILD_SEPARATOR = "/";
+
+function validateContextName(name: string): void {
+  if (!name) {
+    throw new Error("Context names must be non-empty and deterministic");
+  }
+  if (name.includes(CONTEXT_CHILD_SEPARATOR)) {
+    throw new Error(`Context names must not contain '${CONTEXT_CHILD_SEPARATOR}'`);
+  }
+}
+
+export function composeChildContextId(parentId: string, name: string): string {
+  validateContextName(name);
+  return `${parentId}${CONTEXT_CHILD_SEPARATOR}${name}`;
+}
+
 /**
  * Common interface for context containers that can be used with useGrip and tap attachment.
  *
@@ -59,11 +75,12 @@ export class GripContext implements GripContextLike {
    * Creates a new GripContext instance.
    *
    * @param engine - The GROK engine that manages this context
-   * @param id - Optional unique identifier (auto-generated if not provided)
+   * @param id - Deterministic context identifier used for persistence and sharing
    */
-  constructor(engine: Grok, id?: string) {
+  constructor(engine: Grok, id: string) {
     this.grok = engine;
-    this.id = id ?? `ctx_${Math.random().toString(36).slice(2)}`;
+    // Context ids must be deterministic so persisted graphs can be restored faithfully.
+    this.id = id;
     this.contextNode = engine.ensureNode(this);
   }
 
@@ -164,6 +181,8 @@ export class GripContext implements GripContextLike {
       throw new Error("Cycle detected in context DAG");
     }
 
+    this.grok.noteLocalPersistenceDirty();
+
     return this;
   }
 
@@ -176,6 +195,7 @@ export class GripContext implements GripContextLike {
   unlinkParent(parent: GripContext): this {
     try {
       this.contextNode.removeParent(parent.contextNode);
+      this.grok.noteLocalPersistenceDirty();
     } catch (e) {
       // Parent not found - ignore
     }
@@ -211,15 +231,38 @@ export class GripContext implements GripContextLike {
   }
 
   /**
-   * Creates a child context that inherits from this context.
+   * Returns a named child context when it is already live.
    *
-   * @param opts - Options for the child context
-   * @param opts.priority - Priority for inheritance (default: 0)
-   * @returns A new child context
+   * Named child contexts are the stable structural identity used for persistence.
    */
-  createChild(opts?: { priority?: number }): GripContext {
-    const child = new GripContext(this.grok).addParent(this, opts?.priority ?? 0);
+  getChild(name: string): GripContext | undefined {
+    return this.grok.getContextById(composeChildContextId(this.id, name));
+  }
+
+  /**
+   * Creates a named child context that inherits from this context.
+   *
+   * Random/anonymous child contexts are intentionally unsupported because they
+   * cannot be addressed reliably by persistence or Glial synchronization.
+   */
+  createChild(name: string, opts?: { priority?: number }): GripContext {
+    const existing = this.getChild(name);
+    if (existing) {
+      throw new Error(`Context '${this.id}' already has a child named '${name}'`);
+    }
+    const child = new GripContext(this.grok, composeChildContextId(this.id, name)).addParent(
+      this,
+      opts?.priority ?? 0,
+    );
+    this.grok.noteLocalPersistenceDirty();
     return child;
+  }
+
+  /**
+   * Returns an existing named child, or creates it if needed.
+   */
+  getOrCreateChild(name: string, opts?: { priority?: number }): GripContext {
+    return this.getChild(name) ?? this.createChild(name, opts);
   }
 
   /**

@@ -18,6 +18,29 @@ import { GripContext } from "./context";
 import type { Tap, TapExecutionMode } from "./tap";
 import { BaseTapNoParams } from "./base_tap";
 
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  if (value === null || typeof value !== "object") {
+    return false;
+  }
+  const proto = Object.getPrototypeOf(value);
+  return proto === Object.prototype || proto === null;
+}
+
+function isPersistableAtomValue(value: unknown): boolean {
+  if (value === null) return true;
+  if (value === undefined) return true;
+  if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") {
+    return true;
+  }
+  if (Array.isArray(value)) {
+    return value.every((item) => isPersistableAtomValue(item));
+  }
+  if (isPlainObject(value)) {
+    return Object.values(value).every((item) => isPersistableAtomValue(item));
+  }
+  return false;
+}
+
 /**
  * Controller interface for atom-style value management.
  *
@@ -126,6 +149,7 @@ export class AtomValueTap<T> extends BaseTapNoParams implements AtomTap<T>, Tap 
     const nextValue = next;
     if (this.currentValue !== nextValue) {
       this.currentValue = nextValue;
+      this.engine?.noteLocalPersistenceDirty();
       this.produce();
       this.listeners.forEach((l) => l());
     }
@@ -152,6 +176,18 @@ export class AtomValueTap<T> extends BaseTapNoParams implements AtomTap<T>, Tap 
   subscribe(listener: () => void): () => void {
     this.listeners.add(listener);
     return () => this.listeners.delete(listener);
+  }
+
+  getPersistedGripValues(): ReadonlyMap<Grip<any>, unknown> {
+    return new Map([[this.valueGrip, this.currentValue]]);
+  }
+
+  restorePersistedGripValue(grip: Grip<any>, value: unknown): boolean {
+    if (grip !== this.valueGrip) {
+      return false;
+    }
+    this.set(value as T);
+    return true;
   }
 }
 
@@ -386,6 +422,7 @@ export class MultiAtomValueTap<Outs extends GripRecord = any>
       }
     }
     if (changed.length) {
+      this.engine?.noteLocalPersistenceDirty();
       this.produce({ changed });
     }
   }
@@ -463,8 +500,28 @@ export class MultiAtomValueTap<Outs extends GripRecord = any>
     const prev = this.values.get(key) as GripValue<Outs[K]> | undefined;
     if (prev !== nextValue) {
       this.values.set(key, nextValue);
+      this.engine?.noteLocalPersistenceDirty();
       this.produce({ changed: grip as unknown as Grip<any> });
     }
+  }
+
+  getPersistedGripValues(): ReadonlyMap<Grip<any>, unknown> {
+    const values = new Map<Grip<any>, unknown>();
+    for (const grip of this.valueGrips) {
+      const value = this.values.get(grip);
+      if (isPersistableAtomValue(value)) {
+        values.set(grip as unknown as Grip<any>, value);
+      }
+    }
+    return values;
+  }
+
+  restorePersistedGripValue(grip: Grip<any>, value: unknown): boolean {
+    if (!this.values.has(grip as unknown as Values<Outs>)) {
+      return false;
+    }
+    this.set(grip as unknown as Outs[keyof Outs], value as GripValue<Outs[keyof Outs]> | undefined);
+    return true;
   }
 }
 

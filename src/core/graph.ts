@@ -692,7 +692,7 @@ export class GripContextNode implements GripContextNodeIf {
   readonly kind: "GripContextNode" = "GripContextNode";
   readonly grok: Grok;
   readonly id: string;
-  readonly contextRef: WeakRef<GripContext>;
+  contextRef: WeakRef<GripContext>;
   readonly parents: Array<{ node: GripContextNode; priority: number }> = [];
   readonly children: GripContextNode[] = [];
   readonly handleHolder = new TaskHandleHolder();
@@ -757,6 +757,11 @@ export class GripContextNode implements GripContextNodeIf {
    */
   get_context(): GripContext | undefined {
     return this.contextRef.deref();
+  }
+
+  rebindContext(ctx: GripContext): void {
+    this.contextRef = new WeakRef(ctx);
+    this.touch();
   }
 
   get_parent_nodes(): GripContextNode[] {
@@ -1043,6 +1048,7 @@ export class GrokGraph {
       }
       this.startGcIfNeeded();
     } else {
+      node.rebindContext(ctx);
     }
     node.touch();
     return node;

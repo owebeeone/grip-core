@@ -56,8 +56,8 @@ describe("Async State Publishing", () => {
     grok.registerTap(tap1);
     grok.registerTap(tap2);
 
-    const ctx1 = grok.mainPresentationContext.createChild();
-    const ctx2 = grok.mainPresentationContext.createChild();
+    const ctx1 = grok.mainPresentationContext.createChild("ctx_1");
+    const ctx2 = grok.mainPresentationContext.createChild("ctx_2");
     const stateDrip1 = grok.query(STATE1, ctx1);
     const stateDrip2 = grok.query(STATE2, ctx2);
 
@@ -98,7 +98,7 @@ describe("Async State Publishing", () => {
     });
     grok.registerTap(tap);
 
-    const ctx = grok.mainPresentationContext.createChild();
+    const ctx = grok.mainPresentationContext.createChild("ctx_3");
     const stateDrip = grok.query(STATE, ctx);
 
     // First request

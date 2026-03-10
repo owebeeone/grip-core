@@ -40,7 +40,7 @@ describe("Tap execution ownership", () => {
     const INPUT = defineGrip<number>("Role.Input", 0);
     const OUTPUT = defineGrip<number>("Role.Output", 0);
     const grok = new Grok(registry);
-    const ctx = grok.mainPresentationContext.createChild();
+    const ctx = grok.mainPresentationContext.createChild("ctx_1");
 
     const source = createAtomValueTap(INPUT, { initial: 3 });
     grok.registerTap(source);

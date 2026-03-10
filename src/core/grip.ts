@@ -94,6 +94,16 @@ export class GripRegistry {
     // TODO: add a check to see if the requested type is the same as the defined type.
     return this.grips.get(`${scope}:${name}`) as Grip<T> | undefined;
   }
+
+  /**
+   * Retrieves a previously registered Grip by canonical key.
+   *
+   * @param key - Canonical grip key in `<scope>:<name>` form
+   * @returns The registered Grip instance or undefined if not found
+   */
+  getByKey<T>(key: string): Grip<T> | undefined {
+    return this.grips.get(key) as Grip<T> | undefined;
+  }
 }
 
 /**

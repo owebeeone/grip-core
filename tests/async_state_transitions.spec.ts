@@ -41,7 +41,7 @@ describe("Async State Transitions", () => {
     });
     grok.registerTap(tap);
 
-    const ctx = grok.mainPresentationContext.createChild();
+    const ctx = grok.mainPresentationContext.createChild("ctx_1");
     const drip = grok.query(OUT, ctx);
     const stateDrip = grok.query(STATE, ctx);
 
@@ -94,7 +94,7 @@ describe("Async State Transitions", () => {
     });
     grok.registerTap(tap);
 
-    const ctx = grok.mainPresentationContext.createChild();
+    const ctx = grok.mainPresentationContext.createChild("ctx_2");
     const drip = grok.query(OUT, ctx);
     const stateDrip = grok.query(STATE, ctx);
 
@@ -137,7 +137,7 @@ describe("Async State Transitions", () => {
     });
     grok.registerTap(tap);
 
-    const ctx = grok.mainPresentationContext.createChild();
+    const ctx = grok.mainPresentationContext.createChild("ctx_3");
     const stateDrip = grok.query(STATE, ctx);
 
     const state1 = stateDrip.get();

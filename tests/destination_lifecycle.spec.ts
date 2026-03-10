@@ -67,7 +67,7 @@ describe("Destination Lifecycle (Phase 1 - Generic)", () => {
     );
 
     grok.registerTap(tap);
-    const ctx = grok.mainPresentationContext.createChild();
+    const ctx = grok.mainPresentationContext.createChild("ctx_1");
 
     // Add first grip
     const drip1 = grok.query(OUT1, ctx);
@@ -100,7 +100,7 @@ describe("Destination Lifecycle (Phase 1 - Generic)", () => {
     );
 
     grok.registerTap(tap);
-    const ctx = grok.mainPresentationContext.createChild();
+    const ctx = grok.mainPresentationContext.createChild("ctx_2");
 
     // Add multiple grips
     const drip1 = grok.query(OUT1, ctx);
@@ -141,7 +141,7 @@ describe("Destination Lifecycle (Phase 1 - Generic)", () => {
     );
 
     grok.registerTap(tap);
-    const ctx = grok.mainPresentationContext.createChild();
+    const ctx = grok.mainPresentationContext.createChild("ctx_3");
 
     // Add grips
     const drip1 = grok.query(OUT1, ctx);
@@ -180,7 +180,7 @@ describe("Destination Lifecycle (Phase 1 - Generic)", () => {
     );
 
     grok.registerTap(tap);
-    const ctx = grok.mainPresentationContext.createChild();
+    const ctx = grok.mainPresentationContext.createChild("ctx_4");
 
     // Add grip
     const drip = grok.query(OUT, ctx);
@@ -232,7 +232,7 @@ describe("Destination Lifecycle (Phase 1 - Generic)", () => {
     );
 
     grok.registerTap(tap);
-    const ctx = grok.mainPresentationContext.createChild();
+    const ctx = grok.mainPresentationContext.createChild("ctx_5");
 
     // Query to create destination
     const drip = grok.query(OUT, ctx);
@@ -264,7 +264,7 @@ describe("Destination Lifecycle (Phase 1 - Generic)", () => {
     // No createDestinationContext provided
 
     grok.registerTap(tap);
-    const ctx = grok.mainPresentationContext.createChild();
+    const ctx = grok.mainPresentationContext.createChild("ctx_6");
 
     // Query to create destination
     const drip = grok.query(OUT, ctx);
@@ -305,8 +305,8 @@ describe("Destination Lifecycle (Phase 1 - Generic)", () => {
     );
 
     grok.registerTap(tap);
-    const ctx1 = grok.mainPresentationContext.createChild();
-    const ctx2 = grok.mainPresentationContext.createChild();
+    const ctx1 = grok.mainPresentationContext.createChild("ctx_7");
+    const ctx2 = grok.mainPresentationContext.createChild("ctx_8");
 
     // Get destinations - need to query first to create them
     const drip1 = grok.query(OUT, ctx1);

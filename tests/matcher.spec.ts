@@ -41,7 +41,10 @@ describe("TapMatcher", () => {
 
   beforeEach(() => {
     grok = new Grok(new GripRegistry());
-    container = grok.createDualContext(grok.mainPresentationContext);
+    container = grok.createDualContext(grok.mainPresentationContext, {
+      homeName: "matcher-home",
+      destName: "matcher-dest",
+    });
     matcher = new TapMatcher(container);
 
     // Spy on applyAttributionDelta to check its output without a full implementation

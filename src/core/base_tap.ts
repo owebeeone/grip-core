@@ -134,6 +134,7 @@ export abstract class BaseTap implements Tap {
     this.engine = grok;
 
     this.subscribeToIncomingParams();
+    this.engine.noteLocalPersistenceDirty();
   }
 
   /**
@@ -179,6 +180,7 @@ export abstract class BaseTap implements Tap {
    * - Producer record
    */
   onDetach(): void {
+    this.engine?.noteLocalPersistenceDirty();
     this.engine = undefined;
     this.homeContext = undefined;
     this.producer = undefined;

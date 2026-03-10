@@ -48,7 +48,7 @@ describe("Async Listener Tracking", () => {
     });
     grok.registerTap(tap);
 
-    const ctx = grok.mainPresentationContext.createChild();
+    const ctx = grok.mainPresentationContext.createChild("ctx_1");
     const outDrip = grok.query(OUT, ctx);
     const stateDrip = grok.query(STATE, ctx);
     const controllerDrip = grok.query(CONTROLLER, ctx);
@@ -89,7 +89,7 @@ describe("Async Listener Tracking", () => {
     });
     grok.registerTap(tap);
 
-    const ctx = grok.mainPresentationContext.createChild();
+    const ctx = grok.mainPresentationContext.createChild("ctx_2");
     const outDrip = grok.query(OUT, ctx);
     const stateDrip = grok.query(STATE, ctx);
 
@@ -141,7 +141,7 @@ describe("Async Listener Tracking", () => {
     });
     grok.registerTap(tap);
 
-    const ctx = grok.mainPresentationContext.createChild();
+    const ctx = grok.mainPresentationContext.createChild("ctx_3");
     const outDrip = grok.query(OUT, ctx);
     const stateDrip = grok.query(STATE, ctx);
 
@@ -191,7 +191,7 @@ describe("Async Listener Tracking", () => {
     });
     grok.registerTap(tap);
 
-    const ctx = grok.mainPresentationContext.createChild();
+    const ctx = grok.mainPresentationContext.createChild("ctx_4");
     const outDrip = grok.query(OUT, ctx);
     const stateDrip = grok.query(STATE, ctx);
 
@@ -247,8 +247,8 @@ describe("Async Listener Tracking", () => {
     });
     grok.registerTap(tap);
 
-    const ctx1 = grok.mainPresentationContext.createChild();
-    const ctx2 = grok.mainPresentationContext.createChild();
+    const ctx1 = grok.mainPresentationContext.createChild("ctx_5");
+    const ctx2 = grok.mainPresentationContext.createChild("ctx_6");
     const outDrip1 = grok.query(OUT, ctx1);
     const outDrip2 = grok.query(OUT, ctx2);
     const stateDrip1 = grok.query(STATE, ctx1);

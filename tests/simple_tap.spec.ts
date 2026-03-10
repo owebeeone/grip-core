@@ -13,8 +13,8 @@ describe("AtomTap", () => {
 
     const grok = new Grok(registry);
     const home = grok.mainPresentationContext;
-    const destA = home.createChild();
-    const destB = home.createChild();
+    const destA = home.createChild("ctx_1");
+    const destB = home.createChild("ctx_2");
 
     const tap = createAtomValueTap(VALUE, { initial: "A", handleGrip: VALUE_TAP });
     grok.registerTapAt(home, tap as unknown as any);
@@ -44,15 +44,15 @@ describe("AtomTap", () => {
 
     const grok = new Grok(registry);
     const homeRoot = grok.mainHomeContext;
-    const homeChild = homeRoot.createChild();
+    const homeChild = homeRoot.createChild("ctx_3");
 
     const tapRoot = createAtomValueTap(VALUE, { initial: "R", handleGrip: VALUE_TAP });
     grok.registerTapAt(homeRoot, tapRoot as unknown as any);
     const tapChild = createAtomValueTap(VALUE, { initial: "C", handleGrip: VALUE_TAP });
     grok.registerTapAt(homeChild, tapChild as unknown as any);
 
-    const destR = homeRoot.createChild();
-    const destC = homeChild.createChild();
+    const destR = homeRoot.createChild("ctx_4");
+    const destC = homeChild.createChild("ctx_5");
 
     // Connect
     expect(grok.query(VALUE, destR).get()).toBe("R");

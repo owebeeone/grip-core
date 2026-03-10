@@ -69,7 +69,7 @@ describe("Async Retry System", () => {
     });
     grok.registerTap(tap);
 
-    const ctx = grok.mainPresentationContext.createChild();
+    const ctx = grok.mainPresentationContext.createChild("ctx_1");
     const drip = grok.query(OUT, ctx);
     const stateDrip = grok.query(STATE, ctx);
 
@@ -140,7 +140,7 @@ describe("Async Retry System", () => {
     });
     grok.registerTap(tap);
 
-    const ctx = grok.mainPresentationContext.createChild();
+    const ctx = grok.mainPresentationContext.createChild("ctx_2");
     const stateDrip = grok.query(STATE, ctx);
 
     // Query state Grip - state Grips are considered output Grips, so this counts as a listener
@@ -180,7 +180,7 @@ describe("Async Retry System", () => {
     });
     grok.registerTap(tap);
 
-    const ctx = grok.mainPresentationContext.createChild();
+    const ctx = grok.mainPresentationContext.createChild("ctx_3");
     const drip = grok.query(OUT, ctx);
     const stateDrip = grok.query(STATE, ctx);
 
@@ -240,7 +240,7 @@ describe("Async Retry System", () => {
     });
     grok.registerTap(tap);
 
-    const ctx = grok.mainPresentationContext.createChild();
+    const ctx = grok.mainPresentationContext.createChild("ctx_4");
     const drip = grok.query(OUT, ctx);
     const stateDrip = grok.query(STATE, ctx);
 
@@ -302,7 +302,7 @@ describe("Async Retry System", () => {
     });
     grok.registerTap(tap);
 
-    const ctx = grok.mainPresentationContext.createChild();
+    const ctx = grok.mainPresentationContext.createChild("ctx_5");
     const drip = grok.query(OUT, ctx);
     const stateDrip = grok.query(STATE, ctx);
 
@@ -362,7 +362,7 @@ describe("Async Retry System", () => {
     });
     grok.registerTap(tap);
 
-    const ctx = grok.mainPresentationContext.createChild();
+    const ctx = grok.mainPresentationContext.createChild("ctx_6");
     const drip = grok.query(OUT, ctx);
     const stateDrip = grok.query(STATE, ctx);
 
@@ -420,7 +420,7 @@ describe("Async Retry System", () => {
     });
     grok.registerTap(tap);
 
-    const ctx = grok.mainPresentationContext.createChild();
+    const ctx = grok.mainPresentationContext.createChild("ctx_7");
     const drip = grok.query(OUT, ctx);
     const stateDrip = grok.query(STATE, ctx);
 

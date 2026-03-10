@@ -75,9 +75,9 @@ const makeFnTap = () =>
 describe("FunctionTap", () => {
   it("computes outputs from home param, destination param, and local state; updates on changes", () => {
     const grok = new Grok(new GripRegistry());
-    const P = grok.mainPresentationContext.createChild();
-    const D1 = P.createChild();
-    const D2 = P.createChild();
+    const P = grok.mainPresentationContext.createChild("ctx_1");
+    const D1 = P.createChild("ctx_2");
+    const D2 = P.createChild("ctx_3");
 
     // Home param A provider at P
     const aTap = createAtomValueTap(A, { initial: 10 }) as unknown as AtomTap<number>;
@@ -131,8 +131,8 @@ describe("FunctionTap", () => {
 
   it("applies state returned from compute() results without publishing it", () => {
     const grok = new Grok(new GripRegistry());
-    const P = grok.mainPresentationContext.createChild();
-    const D = P.createChild();
+    const P = grok.mainPresentationContext.createChild("ctx_4");
+    const D = P.createChild("ctx_5");
 
     // A provider
     const aTap = createAtomValueTap(A, { initial: 10 }) as unknown as AtomTap<number>;
@@ -163,9 +163,9 @@ describe("FunctionTap", () => {
 
   it("exposes state to visible consumers via handle and propagates on changes", () => {
     const grok = new Grok(new GripRegistry());
-    const P = grok.mainPresentationContext.createChild();
-    const D1 = P.createChild();
-    const D2 = P.createChild();
+    const P = grok.mainPresentationContext.createChild("ctx_6");
+    const D1 = P.createChild("ctx_7");
+    const D2 = P.createChild("ctx_8");
 
     // Providers
     const aTap = createAtomValueTap(A, { initial: 1 }) as unknown as AtomTap<number>;
@@ -210,7 +210,10 @@ describe("FunctionTap", () => {
   it("supports DualContext: separate home params and per-destination ops across multiple destinations", () => {
     const grok = new Grok(new GripRegistry());
     // Create a dual context where home params live in home, and outputs in presentation
-    const container = grok.createDualContext(grok.mainPresentationContext);
+    const container = grok.createDualContext(grok.mainPresentationContext, {
+      homeName: "fn-home",
+      destName: "fn-dest",
+    });
     const home = container.getGripHomeContext();
     const destRoot = container.getGripConsumerContext();
 
@@ -223,8 +226,8 @@ describe("FunctionTap", () => {
     grok.registerTapAt(container, fnTap);
 
     // Two destination contexts under presentation
-    const CD1 = destRoot.createChild();
-    const CD2 = destRoot.createChild();
+    const CD1 = destRoot.createChild("ctx_9");
+    const CD2 = destRoot.createChild("ctx_10");
 
     // Destination OP providers at each dest
     const opTap1 = createAtomValueTap(OP, {
@@ -271,8 +274,8 @@ describe("FunctionTap", () => {
 
   it("README simple stateful tap updates VALUE and propagates B via state", () => {
     const grok = new Grok(new GripRegistry());
-    const P = grok.mainPresentationContext.createChild();
-    const D = P.createChild();
+    const P = grok.mainPresentationContext.createChild("ctx_11");
+    const D = P.createChild("ctx_12");
 
     // Provide A at home context
     const aTap = createAtomValueTap(A, { initial: 5 }) as unknown as AtomTap<number>;

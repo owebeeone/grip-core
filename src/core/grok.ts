@@ -25,6 +25,15 @@ import { TaskHandleHolder, TaskQueue } from "./task_queue";
 import { SimpleResolver, IGripResolver } from "./tap_resolver";
 import { EvaluationDelta, QueryBinding } from "./query_evaluator";
 import { MatchingContext } from "./matcher";
+import {
+  LocalPersistenceProjector,
+  type GripProjector,
+  type LocalPersistenceAttachOptions,
+} from "./local_persistence";
+import {
+  DefaultTapMaterializationRegistry,
+} from "./tap_materialization_registry";
+import type { TapMaterializationRegistry } from "./tap";
 
 /**
  * Utility function to find the intersection of a Set and an Iterable.
@@ -75,6 +84,11 @@ export class Grok {
   /** Task queue for scheduling and executing asynchronous operations */
   private taskQueue = new TaskQueue();
   private originMutationSeq = 0;
+  private readonly projectors = new Map<string, GripProjector>();
+  private localPersistenceSuppressed = false;
+  private hasHydratedFromProjector = false;
+  private tapMaterializationRegistry: TapMaterializationRegistry =
+    new DefaultTapMaterializationRegistry();
 
   /** Root context with no parents, serves as the top-level scope */
   readonly rootContext: GripContext;
@@ -117,6 +131,14 @@ export class Grok {
     return this.registry;
   }
 
+  getTapMaterializationRegistry(): TapMaterializationRegistry {
+    return this.tapMaterializationRegistry;
+  }
+
+  setTapMaterializationRegistry(registry: TapMaterializationRegistry): void {
+    this.tapMaterializationRegistry = registry;
+  }
+
   allocateOriginMutationSeq(): number {
     this.originMutationSeq += 1;
     return this.originMutationSeq;
@@ -124,6 +146,74 @@ export class Grok {
 
   getLastOriginMutationSeq(): number {
     return this.originMutationSeq;
+  }
+
+  runWithLocalPersistenceSuppressed<T>(callback: () => T): T {
+    const previous = this.localPersistenceSuppressed;
+    this.localPersistenceSuppressed = true;
+    try {
+      return callback();
+    } finally {
+      this.localPersistenceSuppressed = previous;
+    }
+  }
+
+  noteLocalPersistenceDirty(): void {
+    if (this.localPersistenceSuppressed) {
+      return;
+    }
+    for (const projector of this.projectors.values()) {
+      if (projector.consumesLocalChanges) {
+        projector.markDirty();
+      }
+    }
+  }
+
+  async attachProjector(projector: GripProjector): Promise<boolean> {
+    this.projectors.get(projector.projectorId)?.detach();
+    this.projectors.set(projector.projectorId, projector);
+    try {
+      const hydrated = await projector.attach(this, {
+        allowHydrate: !this.hasHydratedFromProjector,
+      });
+      if (hydrated) {
+        this.hasHydratedFromProjector = true;
+      }
+      return hydrated;
+    } catch (error) {
+      this.projectors.delete(projector.projectorId);
+      throw error;
+    }
+  }
+
+  detachProjector(projectorId: string): void {
+    const projector = this.projectors.get(projectorId);
+    projector?.detach();
+    this.projectors.delete(projectorId);
+  }
+
+  listProjectors(): readonly GripProjector[] {
+    return Array.from(this.projectors.values());
+  }
+
+  async flushProjectors(): Promise<void> {
+    await Promise.all(Array.from(this.projectors.values(), (projector) => projector.flushNow()));
+  }
+
+  async attachLocalPersistence(options: LocalPersistenceAttachOptions): Promise<void> {
+    await this.attachProjector(new LocalPersistenceProjector(options));
+  }
+
+  detachLocalPersistence(): void {
+    for (const projector of Array.from(this.projectors.values())) {
+      if (projector.projectorKind === "source-backup") {
+        this.detachProjector(projector.projectorId);
+      }
+    }
+  }
+
+  async flushLocalPersistence(): Promise<void> {
+    await this.flushProjectors();
   }
 
   /**
@@ -192,11 +282,15 @@ export class Grok {
    * @param id - Optional unique identifier
    * @returns The newly created context
    */
-  createContext(parent?: GripContext, priority = 0, id?: string): GripContext {
+  createContext(parent: GripContextLike | undefined, priority = 0, id: string): GripContext {
     const ctx = new GripContext(this, id);
     if (parent ?? this.mainContext) ctx.addParent(parent ?? this.mainContext, priority);
     this.ensureNode(ctx);
     return ctx;
+  }
+
+  getContextById(id: string): GripContext | undefined {
+    return this.graph.getNodeById(id)?.get_context();
   }
 
   /**
@@ -222,11 +316,11 @@ export class Grok {
    */
   createDualContext(
     homeParent: GripContext,
-    opts?: { destPriority?: number },
+    opts: { homeName: string; destName: string; destPriority?: number },
   ): DualContextContainer {
-    const home = this.createContext(homeParent, 0);
+    const home = this.createContext(homeParent, 0, opts.homeName);
     // Create presentation child off home
-    const dest = home.createChild();
+    const dest = home.createChild(opts.destName, { priority: opts?.destPriority ?? 0 });
     // Ensure graph and resolver know about dest
     this.ensureNode(dest);
     return new DualContextContainer(home, dest);
@@ -245,6 +339,7 @@ export class Grok {
     const homeCtx = ctx.getGripHomeContext();
     // Delegate to resolver for attach and re-resolution
     this.resolver.addProducer(homeCtx, tap);
+    this.noteLocalPersistenceDirty();
   }
 
   /**
@@ -282,6 +377,7 @@ export class Grok {
     if (homeCtx) {
       // Delegate to resolver so it can re-link affected consumers
       this.resolver.removeProducer(homeCtx, tap);
+      this.noteLocalPersistenceDirty();
     }
   }
 

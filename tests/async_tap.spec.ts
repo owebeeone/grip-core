@@ -27,7 +27,7 @@ describe("Async Tap basics", () => {
     const PARAM = defineGrip<number>("Param", 0);
     const OUT = defineGrip<number>("Out", 0);
     const grok = new Grok(registry);
-    const ctx = grok.mainPresentationContext.createChild();
+    const ctx = grok.mainPresentationContext.createChild("ctx_1");
 
     // Simple param handle
     const paramHandle = (await import("../src/core/atom_tap")).createAtomValueTap(PARAM, {
@@ -75,7 +75,7 @@ describe("Async Tap basics", () => {
     const OUT2 = defineGrip<string>("Out2", "");
     const STATE_X = defineGrip<number>("StateX", 1);
     const grok = new Grok(registry);
-    const ctx = grok.mainPresentationContext.createChild();
+    const ctx = grok.mainPresentationContext.createChild("ctx_2");
 
     const paramHandle = (await import("../src/core/atom_tap")).createAtomValueTap(PARAM, {
       initial: "A",

@@ -9,8 +9,8 @@ describe("GC cleanup of parent-child relationships", () => {
     const mainCtx = grok.mainPresentationContext;
 
     // Create child contexts
-    const child1 = mainCtx.createChild();
-    const child2 = mainCtx.createChild();
+    const child1 = mainCtx.createChild("ctx_1");
+    const child2 = mainCtx.createChild("ctx_2");
     const child1Id = child1.id;
     const child2Id = child2.id;
 
@@ -49,11 +49,11 @@ describe("GC cleanup of parent-child relationships", () => {
     const mainCtx = grok.mainPresentationContext;
 
     // Create a more complex hierarchy
-    const parent1 = mainCtx.createChild();
-    const parent2 = mainCtx.createChild();
-    const child1 = parent1.createChild();
-    const child2 = parent1.createChild();
-    const child3 = parent2.createChild();
+    const parent1 = mainCtx.createChild("ctx_3");
+    const parent2 = mainCtx.createChild("ctx_4");
+    const child1 = parent1.createChild("ctx_5");
+    const child2 = parent1.createChild("ctx_6");
+    const child3 = parent2.createChild("ctx_7");
 
     // Add cross-links
     child3.addParent(parent1, 1); // child3 has two parents
@@ -115,8 +115,8 @@ describe("GC cleanup of parent-child relationships", () => {
     const mainCtx = grok.mainPresentationContext;
 
     // Create child contexts
-    const child1 = mainCtx.createChild();
-    const child2 = mainCtx.createChild();
+    const child1 = mainCtx.createChild("ctx_8");
+    const child2 = mainCtx.createChild("ctx_9");
 
     // Manually corrupt the state by removing from nodes but keeping in children
     const graph = (grok as any).graph as any;

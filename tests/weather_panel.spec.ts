@@ -15,9 +15,9 @@ describe("WeatherPanel-style multi-context, multi-parent with independent simple
     const grok = new Grok(registry);
 
     // Build DAG: A (root child), B (parent A), C (parent A)
-    const A = grok.mainPresentationContext.createChild();
-    const B = A.createChild();
-    const C = A.createChild();
+    const A = grok.mainPresentationContext.createChild("ctx_1");
+    const B = A.createChild("ctx_2");
+    const C = A.createChild("ctx_3");
 
     // Register one simple tap per context with distinct initials
     const tapA = createAtomValueTap(VALUE, { initial: "A", handleGrip: VALUE_TAP });

@@ -22,6 +22,20 @@ import type { GripContextLike } from "./context";
 export type TapExecutionMode = "replicated" | "origin-primary" | "negotiated-primary";
 export type TapExecutionRole = "primary" | "follower";
 
+export interface SharedProjectionTapSpec {
+  tap_id: string;
+  tap_type: string;
+  home_path: string;
+  mode: TapExecutionMode | string;
+  role?: TapExecutionRole | string;
+  provides: string[];
+  home_param_grips?: string[];
+  destination_param_grips?: string[];
+  purpose?: string;
+  description?: string;
+  metadata?: Record<string, unknown>;
+}
+
 /**
  * Tap represents a data producer that can provide one or more Grips.
  *
@@ -159,6 +173,30 @@ export interface Tap {
    * @returns A TapDestinationContext instance, or undefined if not needed
    */
   createDestinationContext?(destination: import("./graph").Destination): import("./graph").TapDestinationContext | undefined;
+
+  /**
+   * Returns persisted grip values owned by this tap.
+   *
+   * Local persistence uses this to capture stateful tap values without
+   * requiring active consumer drips.
+   */
+  getPersistedGripValues?(): ReadonlyMap<Grip<any>, unknown>;
+
+  /**
+   * Restores a previously persisted grip value owned by this tap.
+   *
+   * Returns `true` when the tap consumed the value and no fallback drip
+   * restore is required.
+   */
+  restorePersistedGripValue?(grip: Grip<any>, value: unknown): boolean | void;
+}
+
+export interface SharedValueTap extends Tap {
+  setSharedGripValue?(grip: Grip<any>, value: unknown): boolean | void;
+}
+
+export interface TapMaterializationRegistry {
+  materializeTap(grok: Grok, spec: SharedProjectionTapSpec): Tap;
 }
 
 /**

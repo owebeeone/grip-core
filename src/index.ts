@@ -26,8 +26,18 @@ export type { GripContextNode, DestinationParams, HomeParams } from "./core/grap
 export { Drip } from "./core/drip";
 
 // Taps
-export type { Tap, TapFactory, TapExecutionMode, TapExecutionRole } from "./core/tap";
+export type {
+  SharedProjectionTapSpec,
+  SharedValueTap,
+  Tap,
+  TapFactory,
+  TapExecutionMode,
+  TapExecutionRole,
+  TapMaterializationRegistry,
+} from "./core/tap";
 export { BaseTap, BaseTapNoParams } from "./core/base_tap";
+export { PassiveTap, createPassiveTap } from "./core/passive_tap";
+export { DefaultTapMaterializationRegistry, isPassiveTap } from "./core/tap_materialization_registry";
 export {
   AtomTap,
   AtomTapHandle,
@@ -107,3 +117,10 @@ export {
 } from "./core/query_evaluator";
 export { DisjointSetPartitioner, TupleMap, createCompositeKey } from "./core/query_utils";
 export { TaskQueue, TaskHandleHolder, TaskHandle, TaskHandleContainer } from "./core/task_queue";
+export {
+  applyLocalPersistenceSnapshot,
+  applySharedProjectionSnapshot,
+  buildLocalPersistenceSnapshot,
+  buildSharedProjectionSnapshot,
+  LocalPersistenceProjector,
+} from "./core/local_persistence";
