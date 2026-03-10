@@ -104,6 +104,27 @@ export class GripRegistry {
   getByKey<T>(key: string): Grip<T> | undefined {
     return this.grips.get(key) as Grip<T> | undefined;
   }
+
+  /**
+   * Finds an existing Grip or defines it from a canonical key when missing.
+   *
+   * @param key - Canonical grip key in `<scope>:<name>` form
+   * @param defaultValue - Optional default value for newly created grips
+   * @returns The existing or newly created Grip
+   */
+  findOrDefineByKey<T>(key: string, defaultValue?: T): Grip<T> {
+    const existing = this.getByKey<T>(key);
+    if (existing) {
+      return existing;
+    }
+    const separator = key.indexOf(":");
+    if (separator <= 0 || separator === key.length - 1) {
+      throw new Error(`Invalid canonical grip key: ${key}`);
+    }
+    const scope = key.slice(0, separator);
+    const name = key.slice(separator + 1);
+    return this.findOrDefineGrip<T>(name, defaultValue, scope);
+  }
 }
 
 /**

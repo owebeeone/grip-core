@@ -203,4 +203,39 @@ describe("Grok local persistence", () => {
     const dump = new GripGraphDumper({ grok: followerGrok }).dump();
     expect(dump.nodes.taps.some((node) => node.class === "PassiveTap")).toBe(true);
   });
+
+  it("creates unknown grips dynamically when hydrating a shared projection", () => {
+    const sourceRegistry = new GripRegistry();
+    const defineSourceGrip = GripOf(sourceRegistry);
+    const INPUT = defineSourceGrip<number>("Shared.Dynamic.Input", 0);
+    const OUTPUT = defineSourceGrip<number>("Shared.Dynamic.Output", 0);
+    const sourceGrok = new Grok(sourceRegistry);
+    const sourceContext = sourceGrok.mainPresentationContext.createChild("shared-dynamic");
+
+    const sourceTap = createAtomValueTap(INPUT, { initial: 6 });
+    sourceGrok.registerTap(sourceTap);
+    const functionTap = createFunctionTap({
+      provides: [OUTPUT],
+      homeParamGrips: [INPUT],
+      compute: ({ getHomeParam }) => new Map([[OUTPUT, (getHomeParam(INPUT) ?? 0) * 2]]),
+    });
+    sourceGrok.registerTap(functionTap);
+
+    sourceGrok.query(OUTPUT, sourceContext).get();
+    sourceGrok.flush();
+    const sharedProjection = buildSharedProjectionSnapshot(sourceGrok, "shared-session-dynamic");
+
+    const followerRegistry = new GripRegistry();
+    const followerGrok = new Grok(followerRegistry);
+    applySharedProjectionSnapshot(followerGrok, sharedProjection);
+
+    const hydratedInput = followerRegistry.getByKey<number>(INPUT.key);
+    const hydratedOutput = followerRegistry.getByKey<number>(OUTPUT.key);
+    const followerContext = followerGrok.getContextById(sourceContext.id);
+    expect(hydratedInput).toBeDefined();
+    expect(hydratedOutput).toBeDefined();
+    expect(followerContext).toBeDefined();
+    expect(followerGrok.query(hydratedInput!, followerGrok.mainHomeContext).get()).toBe(6);
+    expect(followerGrok.query(hydratedOutput!, followerContext!).get()).toBe(12);
+  });
 });

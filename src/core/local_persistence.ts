@@ -128,6 +128,10 @@ function getContextName(path: string): string {
   return index === -1 ? path : path.slice(index + 1);
 }
 
+function ensureGripForKey(grok: Grok, gripId: string): Grip<any> {
+  return grok.getRegistry().findOrDefineByKey(gripId);
+}
+
 function isPlainObject(value: unknown): value is Record<string, unknown> {
   if (value === null || typeof value !== "object") {
     return false;
@@ -361,10 +365,7 @@ export function applyLocalPersistenceSnapshot(grok: Grok, snapshot: LocalPersist
     const context = ensureContextForPath(grok, path);
     const contextState = snapshot.contexts[path];
     for (const gripState of Object.values(contextState.drips)) {
-      const grip = grok.getRegistry().getByKey(gripState.grip_id);
-      if (!grip) {
-        continue;
-      }
+      const grip = ensureGripForKey(grok, gripState.grip_id);
       const tap = findPersistableTapForGrip(grok, path, grip);
       const restored = tap?.restorePersistedGripValue?.(grip, gripState.value);
       if (tap?.restorePersistedGripValue && restored !== false) {
@@ -410,10 +411,7 @@ export function applySharedProjectionSnapshot(
       const context = ensureContextForPath(grok, path);
       const contextState = snapshot.contexts[path];
       for (const dripState of Object.values(contextState.drips)) {
-        const grip = grok.getRegistry().getByKey(dripState.grip_id);
-        if (!grip) {
-          continue;
-        }
+        const grip = ensureGripForKey(grok, dripState.grip_id);
         let applied = false;
         for (const tapExport of dripState.taps) {
           const tap = materializedTaps.get(tapExport.tap_id) as SharedValueTap | undefined;

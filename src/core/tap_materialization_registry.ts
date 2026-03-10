@@ -18,7 +18,7 @@ export class DefaultTapMaterializationRegistry implements TapMaterializationRegi
       return materializer(grok, spec);
     }
     const provides = spec.provides
-      .map((gripId) => grok.getRegistry().getByKey(gripId))
+      .map((gripId) => grok.getRegistry().findOrDefineByKey(gripId))
       .filter((grip): grip is Grip<any> => Boolean(grip));
     return createPassiveTap(spec, provides);
   }
