@@ -48,6 +48,10 @@ export {
   createAsyncHomeValueTap,
   createAsyncHomeMultiTap,
 } from "./core/async_tap";
+export {
+  createAsyncStreamMultiTap,
+  type AsyncStreamMultiTapConfig,
+} from "./core/async_stream_tap";
 
 // Query system
 export { Query, withOneOf, withAnyOf, QueryBuilderFactory } from "./core/query";
