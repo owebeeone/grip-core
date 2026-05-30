@@ -111,6 +111,71 @@ Query semantics
 - `useGrip(grip, dual.dest)` reads outputs from `dest`.
 - Taps registered at `dual.home` read `homeParamGrips` from `dual.home` lineage; `destinationParamGrips` are read from `dual.dest` lineage.
 
+## Keyed get-or-create contexts
+
+For repeated UI regions (columns, panes), cache child contexts on the parent
+facade instead of calling `createChild()` on every render.
+
+```ts
+parent.getOrCreateChildContext(key, init?, opts?)
+parent.getOrCreateMatchingContext(key, init?, opts?)
+```
+
+Semantics:
+
+- Cache key is the string `key`, not `context.id`.
+- Cache entries are `WeakRef`s on the live parent facade; stale entries are
+  pruned on the next lookup.
+- `init` runs exactly once when a new live entry is created. Prefer stable named
+  setup functions; do not depend on render-varying closures.
+- Same key under different parents yields different contexts.
+
+### Keyed child context
+
+Use when a pane needs an isolated scope without matcher-based provider
+selection (weather columns, simple editor panes).
+
+```ts
+const pane = parent.getOrCreateChildContext(`editor:${columnId}`, (ctx) => {
+  ctx.registerTap(/* column-local atom taps */);
+});
+```
+
+### Keyed matching context
+
+Use when a pane selects among competing taps based on home-context query inputs
+(live feed vs mock feed per column).
+
+Factory layout:
+
+```text
+parent
+  └── home            ← column inputs (SOURCE, PRODUCT atom taps)
+        └── presentation   ← consumers read outputs here
+```
+
+```ts
+const column = parent.getOrCreateMatchingContext(`coin:${columnId}`, (ctx) => {
+  ctx.getGripHomeContext().registerTap(createAtomValueTap(SOURCE, { initial: "mock" }));
+  ctx.addBinding({
+    id: "live",
+    query: withOneOf(SOURCE, "live", 10).build(),
+    tap: liveTapFactory,
+    baseScore: 5,
+  });
+});
+
+// Read outputs from presentation; register input atoms via home (see React hooks).
+const price = grok.query(PRICE, column.getGripConsumerContext());
+```
+
+Parent-registered fallback taps can still read column-local **destination
+parameters** when presentation is a child of home (see
+`tests/context_keyed.spec.ts`).
+
+Reference demo: `grip-react-demo` coin stream tab (`CoinColumn.tsx`,
+`cointaps.ts`).
+
 ## Migration Plan
 1) Introduce `destinationParamGrips` and `homeParamGrips` on `Tap`. Keep `parameterGrips` as deprecated alias for a short period (tests updated first).
 2) Add per-tap destination index and home/destination param subscriptions to engine; implement precise invalidation.

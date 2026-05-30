@@ -166,6 +166,80 @@ const grok = new Grok(registry);
 grok.registerTap(userDataTap);
 ```
 
+### **4. AsyncStreamMultiTap: Long-Lived Streams**
+
+Use `createAsyncStreamMultiTap` for subscriptions that stay open and emit many
+updates (websockets, tick feeds, service stream events). Use
+`createAsyncValueTap` / `createAsyncMultiTap` for one-shot fetch/response flows.
+
+One stream task runs per **request key**. Destinations with the same key share
+the stream; include `destContext.id` in `requestKeyOf` when a column needs its
+own stream even with identical params.
+
+```ts
+import { createAsyncStreamMultiTap } from "@owebeeone/grip-core";
+
+const priceTap = createAsyncStreamMultiTap({
+  provides: [PRICE, STATUS],
+  destinationParamGrips: [PRODUCT],
+  requestKeyOf: (params) => {
+    const product = params.get(PRODUCT);
+    return product ? `feed:${product}` : undefined;
+  },
+  subscribe: async (params, signal) => myWebSocketIterable(params, signal),
+  mapEvent: (_params, tick) =>
+    new Map([
+      [PRICE, tick.price],
+      [STATUS, tick.status],
+    ]),
+  cacheLatest: true,
+  cleanupDelayMs: 1000,
+  retry: {
+    initialDelayMs: 1000,
+    maxDelayMs: 30_000,
+    stableResetMs: 10_000,
+  },
+});
+```
+
+See `GRIP_STREAM_TAPS.md` for lifecycle, retry, and when to choose stream vs
+one-shot async taps. The `grip-react-demo` coin stream tab is a full example.
+
+## **Keyed Contexts**
+
+Repeated UI regions (columns, panes) should reuse stable contexts instead of
+creating a fresh `createChild()` every render.
+
+```ts
+// Simple isolated scope (weather column, editor pane)
+const column = parent.getOrCreateChildContext("weather:left", (ctx) => {
+  ctx.registerTap(createAtomValueTap(LOCATION, { initial: "London" }));
+});
+
+// Source selection via TapMatcher (live vs mock provider per column)
+const coin = parent.getOrCreateMatchingContext("coin:A", (ctx) => {
+  ctx.getGripHomeContext().registerTap(createAtomValueTap(SOURCE, { initial: "mock" }));
+  ctx.addBinding({
+    id: "live",
+    query: withOneOf(SOURCE, "live", 10).build(),
+    tap: liveFeedTapFactory,
+    baseScore: 5,
+  });
+});
+```
+
+Rules:
+
+- The **key** is the cache identity; `context.id` is for debugging only.
+- The **init** callback runs **once** per live keyed entry. Prefer stable named
+  functions; do not close over render-varying values.
+- `getOrCreateMatchingContext` builds `parent → home → presentation`. Register
+  column input atoms on **home**; read outputs from **presentation**
+  (`matching.getGripConsumerContext()`). Destination params on parent-registered
+  taps resolve through the presentation → home parent chain.
+
+See `GRIP_CONTEXT.md` for home vs destination parameter semantics.
+
 ## **Parameter Types**
 
 Taps can declare two types of parameters that influence their behavior:
