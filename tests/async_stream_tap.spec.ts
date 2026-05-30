@@ -236,6 +236,50 @@ describe("Async stream multi tap", () => {
     expect(drip.get()).toBe("from-b");
   });
 
+  it("publishes reset values when the request key changes", async () => {
+    const registry = new GripRegistry();
+    const defineGrip = GripOf(registry);
+    const PARAM = defineGrip<string>("Param", "a");
+    const OUT = defineGrip<string>("Out", "initial");
+    const grok = new Grok(registry);
+    const ctx = grok.mainPresentationContext.createChild();
+    const paramTap = createAtomValueTap(PARAM, { initial: "a" }) as any;
+    grok.registerTap(paramTap as Tap);
+
+    const streams = new Map<string, ReturnType<typeof streamController<string>>>();
+    grok.registerTap(
+      createAsyncStreamMultiTap<{ O: typeof OUT }, string>({
+        provides: [OUT],
+        destinationParamGrips: [PARAM],
+        cleanupDelayMs: 0,
+        requestKeyOf: (params) => params.get(PARAM),
+        subscribe: (params) => {
+          const key = params.get(PARAM)!;
+          const stream = streamController<string>();
+          streams.set(key, stream);
+          return stream.iterable;
+        },
+        mapEvent: (_params, event) => new Map([[OUT, event]]),
+        getResetUpdates: () => new Map([[OUT, "loading"]]),
+      }),
+    );
+
+    const drip = grok.query(OUT, ctx);
+    drip.subscribe(() => {});
+    await sleep(0);
+    streams.get("a")!.push("from-a");
+    await sleep(0);
+    expect(drip.get()).toBe("from-a");
+
+    paramTap.set("b");
+    await sleep(0);
+    expect(drip.get()).toBe("loading");
+
+    streams.get("b")!.push("from-b");
+    await sleep(0);
+    expect(drip.get()).toBe("from-b");
+  });
+
   it("replays the latest event to a later destination sharing the same key", async () => {
     const registry = new GripRegistry();
     const defineGrip = GripOf(registry);

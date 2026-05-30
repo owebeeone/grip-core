@@ -216,6 +216,7 @@ class MultiOutputAsyncStreamTap<
 
     this.removeDestination(destination);
     destinationState.requestKey = nextKey;
+    this.publishReset(params, dest);
 
     const stream = this.getOrCreateStream(nextKey, params);
     if (stream.cleanupTimer) {
