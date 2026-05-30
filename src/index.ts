@@ -13,7 +13,12 @@
 export { Grip, GripRegistry, GripOf } from "./core/grip";
 
 // Contexts
-export type { GripContext, GripContextLike } from "./core/context";
+export type {
+  ChildContextOptions,
+  GripContext,
+  GripContextLike,
+  MatchingContextOptions,
+} from "./core/context";
 export { DualContextContainer } from "./core/containers";
 
 // Runtime
