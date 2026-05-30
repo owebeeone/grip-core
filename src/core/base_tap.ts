@@ -135,6 +135,7 @@ export abstract class BaseTap implements Tap {
       this.paramDrips.set(paramGrip, paramDrip);
       this.paramDripsSubs.set(paramGrip, sub);
     }
+    this.delayedUpdates = false;
   }
 
   /**
