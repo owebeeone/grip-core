@@ -30,7 +30,7 @@ import { Grip } from "./grip";
 import { Drip, Unsubscribe } from "./drip";
 import { Tap, TapFactory } from "./tap";
 import { DualContextContainer } from "./containers";
-import { GripContext } from "./context";
+import { GripContext, makeContextChildId, registerMatchingContextFactory } from "./context";
 import {
   QueryEvaluator,
   QueryBinding,
@@ -297,3 +297,15 @@ export class MatchingContext extends DualContextContainer {
     this.matcher.removeBinding(bindingId);
   }
 }
+
+registerMatchingContextFactory((parent, key, opts) => {
+  const home = parent.getOrCreateChildContext(key, undefined, {
+    id: opts?.sourceId ?? makeContextChildId(parent.id, key, "source"),
+    priority: opts?.sourcePriority ?? 0,
+  });
+  const presentation = home.getOrCreateChildContext("presentation", undefined, {
+    id: opts?.presentationId ?? makeContextChildId(parent.id, key, "presentation"),
+    priority: opts?.presentationPriority ?? 0,
+  });
+  return new MatchingContext(home, presentation);
+});

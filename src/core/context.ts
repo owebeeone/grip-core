@@ -17,6 +17,7 @@ import { Drip } from "./drip";
 import type { Tap, TapFactory } from "./tap";
 import { GripContextNode } from "./graph";
 import { Grok } from "./grok";
+import type { MatchingContext } from "./matcher";
 
 /**
  * Represents a parameter override that can be either a static value or a dynamic Drip.
@@ -39,6 +40,35 @@ export interface GripContextLike {
   getGrok(): Grok;
 }
 
+export interface ChildContextOptions {
+  id?: string;
+  priority?: number;
+}
+
+export interface MatchingContextOptions {
+  sourceId?: string;
+  presentationId?: string;
+  sourcePriority?: number;
+  presentationPriority?: number;
+}
+
+type MatchingContextFactory = (
+  parent: GripContext,
+  key: string,
+  opts?: MatchingContextOptions,
+) => MatchingContext;
+
+let matchingContextFactory: MatchingContextFactory | undefined;
+
+export function registerMatchingContextFactory(factory: MatchingContextFactory): void {
+  matchingContextFactory = factory;
+}
+
+export function makeContextChildId(parentId: string, key: string, suffix?: string): string {
+  const safeKey = key.replace(/[^a-zA-Z0-9_.:-]+/g, "_");
+  return suffix ? `${parentId}:${safeKey}:${suffix}` : `${parentId}:${safeKey}`;
+}
+
 /**
  * GripContext represents a node in the hierarchical parameter graph.
  *
@@ -53,6 +83,8 @@ export class GripContext implements GripContextLike {
   readonly kind: "GripContext" = "GripContext";
   private grok: Grok;
   private contextNode: GripContextNode;
+  private namedChildContexts = new Map<string, WeakRef<GripContext>>();
+  private namedMatchingContexts = new Map<string, WeakRef<MatchingContext>>();
   readonly id: string;
 
   /**
@@ -217,9 +249,57 @@ export class GripContext implements GripContextLike {
    * @param opts.priority - Priority for inheritance (default: 0)
    * @returns A new child context
    */
-  createChild(opts?: { priority?: number }): GripContext {
-    const child = new GripContext(this.grok).addParent(this, opts?.priority ?? 0);
+  createChild(opts?: ChildContextOptions): GripContext {
+    const child = new GripContext(this.grok, opts?.id).addParent(this, opts?.priority ?? 0);
     return child;
+  }
+
+  getOrCreateChildContext(
+    key: string,
+    init?: (ctx: GripContext) => void,
+    opts?: ChildContextOptions,
+  ): GripContext {
+    const ref = this.namedChildContexts.get(key);
+    const existing = ref?.deref();
+    if (existing) return existing;
+    if (ref) this.namedChildContexts.delete(key);
+
+    const child = this.createChild({
+      id: opts?.id ?? makeContextChildId(this.id, key),
+      priority: opts?.priority,
+    });
+    this.namedChildContexts.set(key, new WeakRef(child));
+    try {
+      init?.(child);
+    } catch (error) {
+      this.namedChildContexts.delete(key);
+      throw error;
+    }
+    return child;
+  }
+
+  getOrCreateMatchingContext(
+    key: string,
+    init?: (ctx: MatchingContext) => void,
+    opts?: MatchingContextOptions,
+  ): MatchingContext {
+    const ref = this.namedMatchingContexts.get(key);
+    const existing = ref?.deref();
+    if (existing) return existing;
+    if (ref) this.namedMatchingContexts.delete(key);
+    if (!matchingContextFactory) {
+      throw new Error("MatchingContext factory is not registered");
+    }
+
+    const context = matchingContextFactory(this, key, opts);
+    this.namedMatchingContexts.set(key, new WeakRef(context));
+    try {
+      init?.(context);
+    } catch (error) {
+      this.namedMatchingContexts.delete(key);
+      throw error;
+    }
+    return context;
   }
 
   /**
