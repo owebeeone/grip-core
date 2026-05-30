@@ -5,6 +5,17 @@ import type { Grip } from "./grip";
 import type { Tap } from "./tap";
 import type { GripRecord, GripValue, Values } from "./function_tap";
 
+export interface AsyncStreamRetryConfig {
+  initialDelayMs?: number;
+  maxDelayMs?: number;
+  backoffMultiplier?: number;
+  jitterRatio?: number;
+  maxRetries?: number;
+  stableResetMs?: number;
+  retryOnError?: (error: unknown) => boolean;
+  random?: () => number;
+}
+
 export interface AsyncStreamMultiTapConfig<
   Outs extends GripRecord,
   Event,
@@ -31,6 +42,7 @@ export interface AsyncStreamMultiTapConfig<
   initialState?: ReadonlyArray<[Grip<any>, any]> | ReadonlyMap<Grip<any>, any>;
   cacheLatest?: boolean;
   cleanupDelayMs?: number;
+  retry?: AsyncStreamRetryConfig | false;
   onError?: (error: unknown, requestKey: string) => void;
 }
 
@@ -40,9 +52,13 @@ interface DestinationState {
 
 interface StreamState<Event> {
   requestKey: string;
+  params: DestinationParams;
   destinations: Set<Destination>;
   abortController: AbortController;
   cleanupTimer: ReturnType<typeof setTimeout> | null;
+  retryTimer: ReturnType<typeof setTimeout> | null;
+  stableResetTimer: ReturnType<typeof setTimeout> | null;
+  retryAttempt: number;
   latestEvent: Event | undefined;
   running: boolean;
 }
@@ -66,6 +82,12 @@ class MultiOutputAsyncStreamTap<
   private readonly resetter?: AsyncStreamMultiTapConfig<Outs, Event, StateRec>["getResetUpdates"];
   private readonly cacheLatest: boolean;
   private readonly cleanupDelayMs: number;
+  private readonly retryConfig?: Required<
+    Omit<AsyncStreamRetryConfig, "retryOnError" | "random">
+  > & {
+    retryOnError: (error: unknown) => boolean;
+    random: () => number;
+  };
   private readonly onError?: (error: unknown, requestKey: string) => void;
   readonly state = new Map<Grip<any>, any>();
 
@@ -85,6 +107,19 @@ class MultiOutputAsyncStreamTap<
     this.resetter = cfg.getResetUpdates;
     this.cacheLatest = cfg.cacheLatest ?? true;
     this.cleanupDelayMs = cfg.cleanupDelayMs ?? 1000;
+    this.retryConfig =
+      cfg.retry === false || cfg.retry === undefined
+        ? undefined
+        : {
+            initialDelayMs: cfg.retry.initialDelayMs ?? 500,
+            maxDelayMs: cfg.retry.maxDelayMs ?? 30_000,
+            backoffMultiplier: cfg.retry.backoffMultiplier ?? 2,
+            jitterRatio: cfg.retry.jitterRatio ?? 0.5,
+            maxRetries: cfg.retry.maxRetries ?? Number.POSITIVE_INFINITY,
+            stableResetMs: cfg.retry.stableResetMs ?? 10_000,
+            retryOnError: cfg.retry.retryOnError ?? (() => true),
+            random: cfg.retry.random ?? Math.random,
+          };
     this.onError = cfg.onError;
     if (cfg.initialState) {
       if (cfg.initialState instanceof Map) {
@@ -139,6 +174,8 @@ class MultiOutputAsyncStreamTap<
   onDetach(): void {
     for (const stream of this.streams.values()) {
       if (stream.cleanupTimer) clearTimeout(stream.cleanupTimer);
+      if (stream.retryTimer) clearTimeout(stream.retryTimer);
+      if (stream.stableResetTimer) clearTimeout(stream.stableResetTimer);
       stream.abortController.abort();
     }
     this.streams.clear();
@@ -186,6 +223,9 @@ class MultiOutputAsyncStreamTap<
       stream.cleanupTimer = null;
     }
     stream.destinations.add(destination);
+    if (!stream.running && !stream.retryTimer) {
+      this.startStream(stream);
+    }
     if (this.cacheLatest && stream.latestEvent !== undefined) {
       this.publishEventToDestination(destination, stream.latestEvent);
     }
@@ -197,18 +237,28 @@ class MultiOutputAsyncStreamTap<
 
     stream = {
       requestKey,
+      params,
       destinations: new Set(),
       abortController: new AbortController(),
       cleanupTimer: null,
+      retryTimer: null,
+      stableResetTimer: null,
+      retryAttempt: 0,
       latestEvent: undefined,
-      running: true,
+      running: false,
     };
     this.streams.set(requestKey, stream);
-    void this.runStream(stream, params);
     return stream;
   }
 
+  private startStream(stream: StreamState<Event>): void {
+    stream.abortController = new AbortController();
+    stream.running = true;
+    void this.runStream(stream, stream.params);
+  }
+
   private async runStream(stream: StreamState<Event>, params: DestinationParams): Promise<void> {
+    let shouldRetry = false;
     try {
       const iterable = await this.subscriber(
         params,
@@ -218,10 +268,12 @@ class MultiOutputAsyncStreamTap<
       for await (const event of iterable) {
         if (stream.abortController.signal.aborted) break;
         if (this.cacheLatest) stream.latestEvent = event;
+        this.markStreamStable(stream);
         for (const destination of Array.from(stream.destinations)) {
           this.publishEventToDestination(destination, event);
         }
       }
+      shouldRetry = !stream.abortController.signal.aborted && stream.destinations.size > 0;
     } catch (error) {
       if (!stream.abortController.signal.aborted) {
         this.onError?.(error, stream.requestKey);
@@ -230,13 +282,55 @@ class MultiOutputAsyncStreamTap<
           const params = context ? this.getDestinationParams(context) : undefined;
           if (context && params) this.publishReset(params, context);
         }
+        shouldRetry = this.retryConfig?.retryOnError(error) ?? false;
       }
     } finally {
       stream.running = false;
-      if (this.streams.get(stream.requestKey) === stream && stream.destinations.size === 0) {
+      if (stream.stableResetTimer) {
+        clearTimeout(stream.stableResetTimer);
+        stream.stableResetTimer = null;
+      }
+      if (
+        shouldRetry &&
+        stream.destinations.size > 0 &&
+        this.streams.get(stream.requestKey) === stream
+      ) {
+        this.scheduleRetry(stream);
+      } else if (this.streams.get(stream.requestKey) === stream && stream.destinations.size === 0) {
         this.streams.delete(stream.requestKey);
       }
     }
+  }
+
+  private markStreamStable(stream: StreamState<Event>): void {
+    if (!this.retryConfig || stream.retryAttempt === 0 || stream.stableResetTimer) return;
+    stream.stableResetTimer = setTimeout(() => {
+      stream.stableResetTimer = null;
+      if (stream.running) stream.retryAttempt = 0;
+    }, this.retryConfig.stableResetMs);
+  }
+
+  private scheduleRetry(stream: StreamState<Event>): void {
+    if (!this.retryConfig || stream.retryTimer || stream.running) return;
+    if (stream.retryAttempt >= this.retryConfig.maxRetries) return;
+    const delay = this.getRetryDelayMs(stream.retryAttempt);
+    stream.retryAttempt += 1;
+    stream.retryTimer = setTimeout(() => {
+      stream.retryTimer = null;
+      if (stream.destinations.size === 0 || this.streams.get(stream.requestKey) !== stream) return;
+      this.startStream(stream);
+    }, delay);
+  }
+
+  private getRetryDelayMs(attempt: number): number {
+    const retry = this.retryConfig!;
+    const baseDelay = Math.min(
+      retry.maxDelayMs,
+      retry.initialDelayMs * retry.backoffMultiplier ** attempt,
+    );
+    const jitterRatio = Math.max(0, Math.min(1, retry.jitterRatio));
+    const jitterScale = 1 - jitterRatio + retry.random() * jitterRatio;
+    return Math.max(0, Math.round(baseDelay * jitterScale));
   }
 
   private publishEventToDestination(destination: Destination, event: Event): void {
@@ -277,6 +371,14 @@ class MultiOutputAsyncStreamTap<
     if (stream.cleanupTimer) {
       clearTimeout(stream.cleanupTimer);
       stream.cleanupTimer = null;
+    }
+    if (stream.retryTimer) {
+      clearTimeout(stream.retryTimer);
+      stream.retryTimer = null;
+    }
+    if (stream.stableResetTimer) {
+      clearTimeout(stream.stableResetTimer);
+      stream.stableResetTimer = null;
     }
     stream.abortController.abort();
     this.streams.delete(stream.requestKey);

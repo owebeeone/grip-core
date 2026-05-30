@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { createAtomValueTap } from "../src/core/atom_tap";
 import { createAsyncStreamMultiTap } from "../src/core/async_stream_tap";
 import { GripOf, GripRegistry } from "../src/core/grip";
@@ -53,6 +53,10 @@ function streamController<T>() {
 }
 
 describe("Async stream multi tap", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
   it("publishes stream events and aborts when the last listener leaves", async () => {
     const registry = new GripRegistry();
     const defineGrip = GripOf(registry);
@@ -218,5 +222,101 @@ describe("Async stream multi tap", () => {
     d2.subscribe(() => {});
     await sleep(0);
     expect(d2.get()).toBe("latest");
+  });
+
+  it("retries failed streams with bounded jittered backoff", async () => {
+    vi.useFakeTimers();
+    const registry = new GripRegistry();
+    const defineGrip = GripOf(registry);
+    const PARAM = defineGrip<string>("Param", "shared");
+    const OUT = defineGrip<string>("Out", "");
+    const grok = new Grok(registry);
+    const ctx = grok.mainPresentationContext.createChild();
+    grok.registerTap(createAtomValueTap(PARAM, { initial: "shared" }) as unknown as Tap);
+
+    const stream = streamController<string>();
+    const errors: string[] = [];
+    let subscribeCount = 0;
+    grok.registerTap(
+      createAsyncStreamMultiTap<{ O: typeof OUT }, string>({
+        provides: [OUT],
+        destinationParamGrips: [PARAM],
+        cleanupDelayMs: 0,
+        retry: {
+          initialDelayMs: 1000,
+          maxDelayMs: 1000,
+          jitterRatio: 0,
+          random: () => 1,
+        },
+        requestKeyOf: (params) => params.get(PARAM),
+        subscribe: () => {
+          subscribeCount += 1;
+          if (subscribeCount === 1) throw new Error("temporary");
+          return stream.iterable;
+        },
+        mapEvent: (_params, event) => new Map([[OUT, event]]),
+        onError: (error) => {
+          errors.push((error as Error).message);
+        },
+      }),
+    );
+
+    const drip = grok.query(OUT, ctx);
+    drip.subscribe(() => {});
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(subscribeCount).toBe(1);
+    expect(errors).toEqual(["temporary"]);
+
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(subscribeCount).toBe(2);
+
+    stream.push("after-retry");
+    await vi.advanceTimersByTimeAsync(0);
+    expect(drip.get()).toBe("after-retry");
+  });
+
+  it("cancels a pending retry when the last destination detaches", async () => {
+    vi.useFakeTimers();
+    const registry = new GripRegistry();
+    const defineGrip = GripOf(registry);
+    const PARAM = defineGrip<string>("Param", "shared");
+    const OUT = defineGrip<string>("Out", "");
+    const grok = new Grok(registry);
+    const ctx = grok.mainPresentationContext.createChild();
+    grok.registerTap(createAtomValueTap(PARAM, { initial: "shared" }) as unknown as Tap);
+
+    let subscribeCount = 0;
+    grok.registerTap(
+      createAsyncStreamMultiTap<{ O: typeof OUT }, string>({
+        provides: [OUT],
+        destinationParamGrips: [PARAM],
+        cleanupDelayMs: 0,
+        retry: {
+          initialDelayMs: 1000,
+          maxDelayMs: 1000,
+          jitterRatio: 0,
+          random: () => 1,
+        },
+        requestKeyOf: (params) => params.get(PARAM),
+        subscribe: () => {
+          subscribeCount += 1;
+          throw new Error("temporary");
+        },
+        mapEvent: (_params, event) => new Map([[OUT, event]]),
+      }),
+    );
+
+    const drip = grok.query(OUT, ctx);
+    const unsubscribe = drip.subscribe(() => {});
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(subscribeCount).toBe(1);
+
+    unsubscribe();
+    await vi.advanceTimersByTimeAsync(0);
+    await vi.advanceTimersByTimeAsync(1000);
+
+    expect(subscribeCount).toBe(1);
   });
 });
