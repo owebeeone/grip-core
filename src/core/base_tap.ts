@@ -135,18 +135,32 @@ export abstract class BaseTap implements Tap {
       this.paramDrips.set(paramGrip, paramDrip);
       this.paramDripsSubs.set(paramGrip, sub);
     }
+
+    // Wiring complete: stop delaying and flush any param changes that arrived
+    // while subscriptions were being established. Without clearing this flag the
+    // tap would never react to home-param changes after attach — produceOnParams
+    // would stay gated forever and re-keying would only happen on fresh onConnect.
+    this.delayedUpdates = false;
+    if (this.paramUpdates.size > 0) {
+      const pending = [...this.paramUpdates];
+      this.paramUpdates.clear();
+      for (const paramGrip of pending) this.produceOnParams?.(paramGrip);
+    }
   }
 
   /**
    * Called when a home parameter changes.
    *
-   * Queues parameter update and calls produceOnParams if not in delayed mode.
+   * While subscriptions are still being wired up (delayedUpdates), the grip is
+   * queued and flushed once wiring completes; afterwards changes drive
+   * produceOnParams immediately.
    */
   inputParmsChanged(paramGrip: Grip<any>): void {
-    this.paramUpdates.add(paramGrip);
-    if (!this.delayedUpdates) {
-      this.produceOnParams!(paramGrip);
+    if (this.delayedUpdates) {
+      this.paramUpdates.add(paramGrip);
+      return;
     }
+    this.produceOnParams?.(paramGrip);
   }
 
   /**
