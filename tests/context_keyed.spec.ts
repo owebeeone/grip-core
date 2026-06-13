@@ -125,3 +125,61 @@ describe("keyed matching context helpers", () => {
     expect(drip.get()).toBe("fallback:ETH-USD");
   });
 });
+
+describe("deterministic context id reuse (retire-and-replace)", () => {
+  // Keyed context ids are DETERMINISTIC (parent.id + key). After a holder
+  // unmounts, its context is collected (drips and tap handles hold their
+  // context STRONGLY, so a context nobody reaches has no consumer that can
+  // ever fire again) — but the graph node lingers until the sweep. A
+  // remount recreating the same id must get a FRESH node: the old one is
+  // retired, never rebound. The stale path used to throw "Context is gone"
+  // (gryth-ui blank-tab crash).
+  it("gives a reused id a fresh node once the old context is collected", () => {
+    const grok = new Grok(new GripRegistry());
+    const main = grok.mainPresentationContext;
+    const first = main.createChild({ id: "dup-a" });
+    const staleNode = first._getContextNode();
+    // simulate the previous context having been GC'd (WeakRef cleared)
+    (staleNode as { contextRef: unknown }).contextRef = { deref: () => undefined };
+
+    const second = main.createChild({ id: "dup-a" });
+    const freshNode = second._getContextNode();
+    expect(freshNode).not.toBe(staleNode);
+    expect(freshNode.get_context()).toBe(second);
+  });
+
+  it("serves consumers on the replacement context (the blank-tab crash)", () => {
+    const registry = new GripRegistry();
+    const defineGrip = GripOf(registry);
+    const VALUE = defineGrip<string>("Retire.Value", "fallback");
+    const grok = new Grok(registry);
+    const main = grok.mainPresentationContext;
+
+    const first = main.createChild({ id: "dup-b" });
+    first.getOrCreateConsumer(VALUE).subscribe(() => {});
+    (first._getContextNode() as { contextRef: unknown }).contextRef = { deref: () => undefined };
+
+    const second = main.createChild({ id: "dup-b" });
+    const drip = second.getOrCreateConsumer(VALUE); // threw "Context is gone" before
+    drip.subscribe(() => {});
+    expect(drip.get()).toBe("fallback");
+
+    const tap = createAtomValueTap(VALUE, { initial: "served" });
+    grok.registerTapAt(second, tap);
+    expect(second.getOrCreateConsumer(VALUE).get()).toBe("served");
+  });
+
+  it("never rebinds: a still-referenced previous context keeps its own node", () => {
+    // WeakRef liveness lags reachability — the previous context may still
+    // deref while pending GC. Last-one-wins the id slot; the old context
+    // keeps functioning through the node object it already holds.
+    const grok = new Grok(new GripRegistry());
+    const main = grok.mainPresentationContext;
+    const first = main.createChild({ id: "dup-c" });
+    const n1 = first._getContextNode();
+    const second = main.createChild({ id: "dup-c" });
+    expect(second._getContextNode()).not.toBe(n1);
+    expect(n1.get_context()).toBe(first);
+    expect(second._getContextNode().get_context()).toBe(second);
+  });
+});
