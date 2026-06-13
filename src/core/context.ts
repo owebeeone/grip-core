@@ -210,7 +210,11 @@ export class GripContext implements GripContextLike {
       this.contextNode.removeParent(parent.contextNode);
     } catch (e) {
       // Parent not found - ignore
+      return this;
     }
+    // Re-resolve consumers so providers reached only through the removed
+    // parent are dropped (the symmetric half of addParent).
+    this.grok.resolver.unlinkParent(this, parent);
     return this;
   }
 

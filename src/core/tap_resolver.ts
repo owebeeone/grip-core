@@ -474,9 +474,9 @@ export class SimpleResolver implements IGripResolver {
    * all consumers in the context and its descendants.
    */
   unlinkParent(context: GripContext, parent: GripContext): void {
-    // Update the graph to reflect the removed parent, then re-evaluate.
-    // If the context implementation does not support unlinking, this is a no-op.
-    (context as any).unlinkParent?.(parent);
+    // The caller has already applied the structural change; re-resolve every
+    // consumer in this context and its descendants so providers reached only
+    // through the severed parent are dropped (symmetric with addParent).
     this.reevaluateDescendants(context);
   }
 
