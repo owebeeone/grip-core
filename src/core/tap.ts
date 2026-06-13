@@ -33,6 +33,22 @@ import type { GripContextLike } from "./context";
  * The engine manages the lifecycle of Taps, calling appropriate hooks
  * when they are attached, connected, or disconnected.
  */
+/**
+ * Declares a Tap's value as a sharable surface (GLP-0005, GQ-5). Plain data:
+ * grip-core carries the *declaration and hooks* only and imports no glade
+ * types. A binder (grip-share) maps `gladeId` to a share, captures local
+ * changes via `getShareValue`/`subscribeShare`, and applies remote changes via
+ * `applyShareValue`. An app with no binder attached pays nothing.
+ */
+export interface ShareDecl {
+  /** Stable, runtime-neutral share-space id (decoupled from grip keys). */
+  gladeId: string;
+  /** The declared glade shape that selects the fold: "value" | "log" | ... */
+  shape: string;
+  /** "share" (authority is the share) | "external" (replicated cache). */
+  authority?: string;
+}
+
 export interface Tap {
   readonly kind: "Tap";
 
@@ -44,6 +60,18 @@ export interface Tap {
 
   /** Parameters read from the home (provider) context lineage (affect all destinations under the provider) */
   homeParamGrips?: readonly Grip<any>[];
+
+  /** Optional: declares this Tap's value as a sharable glade surface. */
+  share?: ShareDecl;
+
+  /** Optional capture: the Tap's current sharable value. */
+  getShareValue?(): unknown;
+
+  /** Optional apply: set the value from a share (caller manages echo by origin). */
+  applyShareValue?(value: unknown): void;
+
+  /** Optional: subscribe to local share-value changes; returns an unsubscribe. */
+  subscribeShare?(listener: () => void): () => void;
 
   /**
    * Called when the Tap is attached to a home context.

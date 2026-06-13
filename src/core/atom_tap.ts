@@ -15,7 +15,7 @@
 
 import { Grip } from "./grip";
 import { GripContext } from "./context";
-import type { Tap } from "./tap";
+import type { ShareDecl, Tap } from "./tap";
 import { BaseTapNoParams } from "./base_tap";
 
 /**
@@ -64,6 +64,9 @@ export class AtomValueTap<T> extends BaseTapNoParams implements AtomTap<T>, Tap 
   /** Optional Grip that provides the controller handle */
   private handleGrip: Grip<AtomTapHandle<T>> | undefined;
 
+  /** Optional glade share declaration (GQ-5) — makes this atom sharable. */
+  share?: ShareDecl;
+
   /** Set of listeners to notify when the value changes */
   private listeners = new Set<() => void>();
 
@@ -75,11 +78,12 @@ export class AtomValueTap<T> extends BaseTapNoParams implements AtomTap<T>, Tap 
    * @param opts - Optional configuration
    * @param opts.handleGrip - Optional Grip for exposing the controller interface
    */
-  constructor(grip: Grip<T>, initial?: T | undefined, opts?: { handleGrip?: Grip<any> }) {
+  constructor(grip: Grip<T>, initial?: T | undefined, opts?: { handleGrip?: Grip<any>; share?: ShareDecl }) {
     super({ provides: opts?.handleGrip ? [grip, opts.handleGrip] : [grip] });
     this.valueGrip = grip;
     this.handleGrip = opts?.handleGrip;
     this.currentValue = initial ?? grip.defaultValue!;
+    if (opts?.share) this.share = opts.share; // own property only when declared
   }
 
   /**
@@ -146,6 +150,25 @@ export class AtomValueTap<T> extends BaseTapNoParams implements AtomTap<T>, Tap 
     this.listeners.add(listener);
     return () => this.listeners.delete(listener);
   }
+
+  // --- share hooks (GQ-5): protocol-free capture/apply for the glade binder ---
+
+  /** Capture: the current sharable value. */
+  getShareValue(): unknown {
+    return this.currentValue;
+  }
+
+  /** Apply a value from a share. Uses `set`, so a binder applying a remote op
+   * must guard its own change-listener against the resulting notification
+   * (echo control by origin lives in the binder, not here). */
+  applyShareValue(value: unknown): void {
+    this.set(value as T);
+  }
+
+  /** Subscribe to local value changes (drives op emission in the binder). */
+  subscribeShare(listener: () => void): () => void {
+    return this.subscribe(listener);
+  }
 }
 
 /**
@@ -165,19 +188,19 @@ export class AtomValueTap<T> extends BaseTapNoParams implements AtomTap<T>, Tap 
 // Overload 1: When initial value is provided and is non-nullable, return AtomValueTap with non-nullable type
 export function createAtomValueTap<T>(
   grip: Grip<T | undefined>,
-  opts: { initial: NonNullable<T>; handleGrip?: Grip<any> },
+  opts: { initial: NonNullable<T>; handleGrip?: Grip<any>; share?: ShareDecl },
 ): AtomValueTap<NonNullable<T>>;
 
 // Overload 2: Standard case - return AtomValueTap with original grip type
 export function createAtomValueTap<T>(
   grip: Grip<T>,
-  opts?: { initial?: T; handleGrip?: Grip<any> },
+  opts?: { initial?: T; handleGrip?: Grip<any>; share?: ShareDecl },
 ): AtomValueTap<T>;
 
 // Implementation
 export function createAtomValueTap<T>(
   grip: Grip<T>,
-  opts?: { initial?: T | undefined; handleGrip?: Grip<any> },
+  opts?: { initial?: T | undefined; handleGrip?: Grip<any>; share?: ShareDecl },
 ): AtomValueTap<T> {
   const tap = new AtomValueTap<T>(grip, opts?.initial ?? grip.defaultValue!, opts);
   return tap;
