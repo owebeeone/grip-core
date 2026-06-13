@@ -236,19 +236,17 @@ export class FunctionTap<
     this.produce();
   }
 
-  // Wire up home param subscriptions in addition to BaseTap destination param handling
   onAttach(home: GripContext): void {
     super.onAttach(home);
-    // Subscribe to homeParamGrips (if any) at the home context lineage
+    // Ensure each home param resolves to a provider. We must NOT subscribe to
+    // home-param changes here: BaseTap.subscribeToIncomingParams already drives
+    // produceOnParams() on every home-param change. Subscribing again made each
+    // change run compute twice — double-applying any self-written state (the
+    // root cause once base_tap stopped gating produceOnParams in 3b02f45).
     if (this.homeParamGrips && this.homeParamGrips.length > 0) {
       for (const g of this.homeParamGrips) {
-        const d = home.getOrCreateConsumer(g);
-        // Ensure resolution to a provider for the home parameter
+        home.getOrCreateConsumer(g);
         home.getGrok().resolver.addConsumer(home, g as unknown as Grip<any>);
-        const unsub = d.subscribe(() => {
-          this.produce();
-        });
-        this.homeParamUnsubs.push(unsub);
       }
     }
   }
