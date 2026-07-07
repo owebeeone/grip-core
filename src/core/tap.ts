@@ -18,6 +18,12 @@ import { GripContext } from "./context";
 import { Drip } from "./drip";
 import type { Grok } from "./grok";
 import type { GripContextLike } from "./context";
+import type { ShareDecl } from "./share_decl";
+
+// The share-declaration vocabulary rides the glade-decl contract; `share_decl`
+// is grip-core's single seam onto it. Re-exported here so existing importers
+// (`./tap`) keep their path.
+export type { ShareDecl } from "./share_decl";
 
 /**
  * Tap represents a data producer that can provide one or more Grips.
@@ -33,29 +39,6 @@ import type { GripContextLike } from "./context";
  * The engine manages the lifecycle of Taps, calling appropriate hooks
  * when they are attached, connected, or disconnected.
  */
-/**
- * Declares a Tap's value as a sharable surface (GLP-0005, GQ-5). Plain data:
- * grip-core carries the *declaration and hooks* only and imports no glade
- * types. A binder (grip-share) maps `gladeId` to a share, captures local
- * changes via `getShareValue`/`subscribeShare`, and applies remote changes via
- * `applyShareValue`. An app with no binder attached pays nothing.
- */
-export interface ShareDecl {
-  /** Stable, runtime-neutral share-space id (decoupled from grip keys). */
-  gladeId: string;
-  /** The declared glade shape that selects the fold: "value" | "log" | ... */
-  shape: string;
-  /** "share" (authority is the share) | "external" (replicated cache). */
-  authority?: string;
-  /** Which replicated world this surface lives in (e.g. "doc" | "account").
-   *  A binder's scope maps it to the wire `share`. Defaults per the scope. */
-  domain?: string;
-  /** The converging partition within the domain (e.g. "commons" | "private").
-   *  A binder's scope maps it to the wire `key`; "commons" => empty key,
-   *  "private" => keyed to self. Defaults to commons. (See GladeZones.md.) */
-  zone?: string;
-}
-
 export interface Tap {
   readonly kind: "Tap";
 
