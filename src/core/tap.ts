@@ -47,6 +47,13 @@ export interface ShareDecl {
   shape: string;
   /** "share" (authority is the share) | "external" (replicated cache). */
   authority?: string;
+  /** Which replicated world this surface lives in (e.g. "doc" | "account").
+   *  A binder's scope maps it to the wire `share`. Defaults per the scope. */
+  domain?: string;
+  /** The converging partition within the domain (e.g. "commons" | "private").
+   *  A binder's scope maps it to the wire `key`; "commons" => empty key,
+   *  "private" => keyed to self. Defaults to commons. (See GladeZones.md.) */
+  zone?: string;
 }
 
 export interface Tap {
