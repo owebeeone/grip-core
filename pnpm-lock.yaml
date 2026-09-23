@@ -4,6 +4,9 @@ settings:
   autoInstallPeers: true
   excludeLinksFromLockfile: false
 
+overrides:
+  '@owebeeone/glade-decl': file:../glade-decl-ts
+
 importers:
 
   .:

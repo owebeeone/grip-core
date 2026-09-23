@@ -1,6 +1,6 @@
 {
   "name": "@owebeeone/grip-core",
-  "version": "0.2.1",
+  "version": "0.3.0",
   "description": "Framework-agnostic core runtime for GRIP (Generalized Retrieval Intent Provisioning).",
   "author": "Gianni Mariani",
   "license": "MIT",
@@ -10,9 +10,14 @@
   "sideEffects": false,
   "exports": {
     ".": {
-      "types": "./dist/index.d.ts",
-      "import": "./dist/index.mjs",
-      "require": "./dist/index.js"
+      "import": {
+        "types": "./dist/index.d.mts",
+        "default": "./dist/index.mjs"
+      },
+      "require": {
+        "types": "./dist/index.d.ts",
+        "default": "./dist/index.js"
+      }
     }
   },
   "repository": {
@@ -33,7 +38,7 @@
     "test": "vitest"
   },
   "dependencies": {
-    "@owebeeone/glade-decl": "file:../glade-decl-ts"
+    "@owebeeone/glade-decl": "^0.1.0"
   },
   "devDependencies": {
     "@types/node": "^24.10.1",
@@ -42,5 +47,10 @@
     "typescript": "^5.0.0",
     "util": "^0.12.5",
     "vitest": "^4.0.13"
+  },
+  "pnpm": {
+    "overrides": {
+      "@owebeeone/glade-decl": "file:../glade-decl-ts"
+    }
   }
 }
