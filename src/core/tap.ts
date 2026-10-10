@@ -18,6 +18,12 @@ import { GripContext } from "./context";
 import { Drip } from "./drip";
 import type { Grok } from "./grok";
 import type { GripContextLike } from "./context";
+import type { ShareDecl } from "./share_decl";
+
+// The share-declaration vocabulary rides the glade-decl contract; `share_decl`
+// is grip-core's single seam onto it. Re-exported here so existing importers
+// (`./tap`) keep their path.
+export type { ShareDecl } from "./share_decl";
 
 /**
  * Tap represents a data producer that can provide one or more Grips.
@@ -44,6 +50,18 @@ export interface Tap {
 
   /** Parameters read from the home (provider) context lineage (affect all destinations under the provider) */
   homeParamGrips?: readonly Grip<any>[];
+
+  /** Optional: declares this Tap's value as a sharable glade surface. */
+  share?: ShareDecl;
+
+  /** Optional capture: the Tap's current sharable value. */
+  getShareValue?(): unknown;
+
+  /** Optional apply: set the value from a share (caller manages echo by origin). */
+  applyShareValue?(value: unknown): void;
+
+  /** Optional: subscribe to local share-value changes; returns an unsubscribe. */
+  subscribeShare?(listener: () => void): () => void;
 
   /**
    * Called when the Tap is attached to a home context.

@@ -755,6 +755,7 @@ export class GripContextNode implements GripContextNodeIf {
    *
    * @returns The GripContext or undefined if it has been garbage collected
    */
+
   get_context(): GripContext | undefined {
     return this.contextRef.deref();
   }
@@ -1031,19 +1032,40 @@ export class GrokGraph {
   }
 
   ensureNode(ctx: GripContext): GripContextNode {
-    let node = this.nodes.get(ctx.id);
-    if (!node) {
-      node = new GripContextNode(this.grok, ctx);
-      this.nodes.set(ctx.id, node);
-      this.weakNodes.set(ctx.id, new WeakRef(node));
-      // Connect parents hard
-      for (const { ctx: parentCtx, priority } of ctx.getParents()) {
-        const parentNode = this.ensureNode(parentCtx);
-        node.addParent(parentNode, priority);
+    const prior = this.nodes.get(ctx.id);
+    if (prior) {
+      const existing = prior.get_context();
+      if (existing === ctx) {
+        prior.touch();
+        return prior;
       }
-      this.startGcIfNeeded();
-    } else {
+      // The id belongs to a DIFFERENT context object. Keyed (deterministic)
+      // ids make this legitimate: the previous holder was released and is
+      // either collected (deref null) or pending GC. The ownership
+      // invariant — drips and tap handles hold their context strongly — so
+      // an unreachable context has no consumer that can ever fire again.
+      // The old node is RETIRED and the id gets a fresh node; a node is
+      // never rebound across contexts.
+      if (existing) {
+        // pending GC — or a duplicate-id caller bug, where last-one-wins
+        // and the old context keeps working through its own node object
+        logger.debug(`context id reused before previous instance was collected: ${ctx.id}`);
+        for (const parentRef of prior.parents.slice()) prior.removeParent(parentRef.node);
+      } else {
+        this.clearContextNode(prior); // provably garbage: no live consumers
+      }
+      this.nodes.delete(ctx.id);
+      this.weakNodes.delete(ctx.id);
     }
+    const node = new GripContextNode(this.grok, ctx);
+    this.nodes.set(ctx.id, node);
+    this.weakNodes.set(ctx.id, new WeakRef(node));
+    // Connect parents hard
+    for (const { ctx: parentCtx, priority } of ctx.getParents()) {
+      const parentNode = this.ensureNode(parentCtx);
+      node.addParent(parentNode, priority);
+    }
+    this.startGcIfNeeded();
     node.touch();
     return node;
   }
@@ -1177,7 +1199,7 @@ export class GrokGraph {
 
     // Third pass: clean up any stale child references in remaining nodes
     for (const [id, node] of this.nodes) {
-      const validChildren = node.children.filter((child) => this.nodes.has(child.id));
+      const validChildren = node.children.filter((child) => this.nodes.get(child.id) === child);
       if (validChildren.length !== node.children.length) {
         node.children.length = 0;
         node.children.push(...validChildren);

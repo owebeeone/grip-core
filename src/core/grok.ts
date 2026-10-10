@@ -343,6 +343,28 @@ export class Grok {
   }
 
   /**
+   * Advertisement (GQ-5, GDL-029): enumerate registered Taps that declare a
+   * glade `share`. A binder (grip-share) walks these to bind sharable surfaces.
+   * Protocol-free — grok knows nothing of glade; a share-free app gets `[]`.
+   *
+   * @returns The distinct share-declaring Taps registered in the graph
+   */
+  listSharedTaps(): Tap[] {
+    const seen = new Set<Tap>();
+    const out: Tap[] = [];
+    for (const node of this.graph.snapshot().values()) {
+      for (const key of node.producerByTap.keys()) {
+        const tap = key as Tap;
+        if (tap && tap.share && !seen.has(tap)) {
+          seen.add(tap);
+          out.push(tap);
+        }
+      }
+    }
+    return out;
+  }
+
+  /**
    * Returns a sanity check of the graph state for debugging.
    *
    * This method helps identify potential issues with the graph,

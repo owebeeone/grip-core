@@ -126,10 +126,10 @@ describe("SimpleResolver", () => {
     registerProducer(cb, new MultiAtomValueTap([gripA], undefined));
     addConsumer(cc, gripA);
     expect(getResolvedContextId(cc, gripA)).toBe(ca.id);
-    // Remove the parent link using grok's API (or a simulated equivalent if not directly available)
-    // For testing, we can temporarily re-add the parent with a lower priority if it was removed.
-    // However, the test scenario is about unlinking, so we call resolver.unlinkParent directly.
-    resolver.unlinkParent(cc, ca);
+    // Unlinking ca through the ergonomic API removes the edge AND re-resolves
+    // consumers, so cc falls back to its remaining parent cb. (resolver.
+    // unlinkParent is now a reevaluate-only hook, symmetric with addParent.)
+    cc.unlinkParent(ca);
     expect(getResolvedContextId(cc, gripA)).toBe(cb.id);
   });
 
