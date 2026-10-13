@@ -893,27 +893,35 @@ export class GripContextNode implements GripContextNodeIf {
   }
 
   getOrCreateConsumer<T>(grip: Grip<T>): Drip<T> {
-    let drip = this.consumers.get(grip as unknown as Grip<any>)?.deref();
+    let drip = this.getLiveDripForGrip(grip);
     if (!drip) {
       const ctx = this.get_context() as GripContext;
       if (!ctx) throw new Error("Context is gone"); // This should never happen.
       const deletedDripRef = this.deletedConsumers.get(grip as unknown as Grip<any>);
       const oldDrip = deletedDripRef?.deref();
-      if (deletedDripRef && !oldDrip) {
-        // We're goind to re-use the old drip, so delete the deleted container.
-        this.deletedConsumers.delete(grip as unknown as Grip<any>);
-      }
+      this.deletedConsumers.delete(grip as unknown as Grip<any>);
       // There is a window where a drip is still being referenced by a React component.
       // Here we re-use the old drip (for this grip in this context) if it's still being referenced.
       if (oldDrip) {
         drip = oldDrip;
+        // A memoized React drip can be revived by its first-subscriber callback.
+        // The subscriber is already installed at that point; resetting would
+        // erase it. Retain the existing lifecycle callbacks as well.
+        if (oldDrip.hasSubscribers()) {
+          this.consumers.set(grip as unknown as Grip<any>, deletedDripRef!);
+          this.lastSeen = Date.now();
+          return oldDrip as Drip<T>;
+        }
         oldDrip.reset(ctx, grip.defaultValue as unknown as T | undefined);
       } else {
         drip = new Drip<T>(ctx, grip.defaultValue as unknown as T | undefined);
       }
       this.recordConsumer(grip, drip);
       drip.addOnZeroSubscribers(() => {
-        this.removeConsumerForGrip(grip);
+        // Delayed cleanup from an old drip must not remove its replacement.
+        if (this.consumers.get(grip as unknown as Grip<any>)?.deref() === drip) {
+          this.removeConsumerForGrip(grip);
+        }
       });
     }
     return drip;
@@ -923,7 +931,7 @@ export class GripContextNode implements GripContextNodeIf {
   getLiveDripForGrip<T>(grip: Grip<T>): Drip<T> | undefined {
     const wr = this.consumers.get(grip as unknown as Grip<any>);
     const d = wr?.deref();
-    if (!d && wr) this.consumers.delete(grip as unknown as Grip<any>);
+    if (!d && wr) this.removeConsumerForGrip(grip);
     return d as unknown as Drip<T> | undefined;
   }
 
