@@ -53,11 +53,13 @@ describe("Async State Publishing", () => {
         return 20;
       },
     });
-    grok.registerTap(tap1);
-    grok.registerTap(tap2);
-
     const ctx1 = grok.mainPresentationContext.createChild();
     const ctx2 = grok.mainPresentationContext.createChild();
+    // These taps share OUT, so their registrations belong in separate scopes.
+    grok.registerTapAt(ctx1, tap1);
+    grok.registerTapAt(ctx2, tap2);
+    const outputDrip1 = grok.query(OUT, ctx1);
+    const outputDrip2 = grok.query(OUT, ctx2);
     const stateDrip1 = grok.query(STATE1, ctx1);
     const stateDrip2 = grok.query(STATE2, ctx2);
 
@@ -67,6 +69,8 @@ describe("Async State Publishing", () => {
     // Each destination should have independent state
     const state1 = stateDrip1.get();
     const state2 = stateDrip2.get();
+    expect(outputDrip1.get()).toBe(10);
+    expect(outputDrip2.get()).toBe(20);
     expect(state1).not.toBe(state2);
     expect(state1.state).not.toBe(state2.state);
   });

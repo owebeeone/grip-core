@@ -103,8 +103,9 @@ export abstract class BaseTap implements Tap {
         `[BaseTap] onAttach: ${this.constructor.name} (id=${this.id}) attached to ${realHome.id}, producer has ${this.producer.getDestinations().size} destinations`,
       );
 
-    // Record producer under each provided grip for resolution
-    for (const g of this.provides) {
+    // A matcher may attribute only a subset of provides. Reattaching after the
+    // last destination disappears must not reclaim another tap's outputs.
+    for (const g of this.producer.outputs) {
       homeNode.recordProducer(g as unknown as Grip<any>, this.producer);
     }
 
@@ -275,7 +276,7 @@ export abstract class BaseTap implements Tap {
       const destCtx = destination.getContext();
       if (!destCtx) continue;
       for (const grip of destination.getGrips()) {
-        if (updates.has(grip)) {
+        if (updates.has(grip) && this.producer.outputs.has(grip)) {
           count += destCtx._getContextNode().notifyConsumers(grip, updates.get(grip));
         }
       }

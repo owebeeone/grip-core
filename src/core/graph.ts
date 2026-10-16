@@ -818,7 +818,9 @@ export class GripContextNode implements GripContextNodeIf {
     const producerRecord = this.producerByTap.get(tap);
     if (producerRecord) {
       for (const grip of producerRecord.outputs) {
-        this.producers.delete(grip);
+        if (this.producers.get(grip) === producerRecord) {
+          this.producers.delete(grip);
+        }
       }
 
       // Delete both the factory and tap instance keys if they exist

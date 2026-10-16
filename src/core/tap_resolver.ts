@@ -166,6 +166,17 @@ export class SimpleResolver implements IGripResolver {
    */
   applyProducerDelta(context: GripContext | GripContextNode, delta: EvaluationDelta): void {
     const node = context.kind === "GripContext" ? context.getNode() : context;
+    // Each result must assign a grip to at most one winner. Reject malformed
+    // attribution before queuing removals, attachments, or any mapping changes.
+    const attributedGrips = new Set<Grip<any>>();
+    for (const attribution of delta.added.values()) {
+      for (const grip of attribution.attributedGrips) {
+        if (attributedGrips.has(grip)) {
+          throw new Error(`Matcher delta assigns grip ${grip.key} to multiple producers in context ${node.id}`);
+        }
+        attributedGrips.add(grip);
+      }
+    }
     if (process.env.NODE_ENV !== "production")
       logger.log(`[SimpleResolver] applyProducerDelta: Queuing delta application for ${node.id}`);
 
@@ -184,6 +195,13 @@ export class SimpleResolver implements IGripResolver {
             this.collectConsumers(producerRecord, grip, consumersToReResolve);
           }
         }
+      }
+
+      // Disconnect while the source mapping still identifies the OLD producer.
+      // Once ownership is overwritten, unresolveConsumer would look up the new
+      // record and leave the old record's destination connected to this grip.
+      for (const { destNode, grip } of consumersToReResolve) {
+        this.unresolveConsumer(destNode, grip);
       }
 
       // --- Step 2: Apply all structural changes to the graph ---
@@ -206,7 +224,12 @@ export class SimpleResolver implements IGripResolver {
       for (const [tapOrFactory, attribution] of delta.added.entries()) {
         // Pass the tap or factory directly to getOrCreateProducerRecord
         // ProducerRecord will handle building the tap if it's a factory
-        const producerRecord = node.getOrCreateProducerRecord(tapOrFactory, tapOrFactory.provides);
+        // Matcher ownership is the attributed subset, not every output the tap
+        // is capable of producing. Establish it before onAttach indexes outputs.
+        const producerRecord = node.getOrCreateProducerRecord(tapOrFactory, []);
+        for (const grip of attribution.attributedGrips) {
+          producerRecord.outputs.add(grip);
+        }
 
         // Ensure the tap is properly attached if it isn't already
         const nodeContext = node.get_context();
@@ -375,17 +398,27 @@ export class SimpleResolver implements IGripResolver {
    * Attaches the Tap to the context, creates producer records, and re-resolves
    * all consumers in the producer's context and descendants that could be affected.
    */
-  addProducer(context: GripContext, tap: Tap): void {
-    // Attach tap to context so it tracks its home and sets up producer record
-    tap.onAttach?.(context);
+  addProducer(context: GripContext, tap: Tap | TapFactory): void {
     const producerNode = this.grok.ensureNode(context);
+    // Direct registration forbids overlapping ownership. Validate the entire
+    // output set before onAttach (which can index outputs and subscribe inputs).
+    // Re-registering the same tap/factory remains idempotent.
+    for (const grip of tap.provides) {
+      const existing = producerNode.get_producers().get(grip);
+      if (existing && existing.tap !== tap && existing.tapFactory !== tap) {
+        throw new Error(`Grip ${grip.key} already has a producer in context ${context.id}`);
+      }
+    }
     const producerRecord = producerNode.getOrCreateProducerRecord(tap, tap.provides);
+    const tapInstance = producerRecord.tap;
+    // Attach the actual instance, including when registration receives a factory.
+    tapInstance.onAttach?.(context);
 
     // Defensive: ensure tap instance reflects attachment even if onAttach was a no-op
     try {
-      (tap as any).producer = (tap as any).producer ?? producerRecord;
-      (tap as any).homeContext = (tap as any).homeContext ?? context;
-      (tap as any).engine = (tap as any).engine ?? this.grok;
+      (tapInstance as any).producer = (tapInstance as any).producer ?? producerRecord;
+      (tapInstance as any).homeContext = (tapInstance as any).homeContext ?? context;
+      (tapInstance as any).engine = (tapInstance as any).engine ?? this.grok;
     } catch {}
 
     // Ensure all provided grips are mapped to this producer record on the producer node
