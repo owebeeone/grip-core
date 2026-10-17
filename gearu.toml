@@ -16,4 +16,4 @@ checks = [
     ["npm", "pack", "--dry-run"],
 ]
 commit_message = "chore(release): grip-core {version}"
-github_notes = "GRIP core {tag}: fixes for contextual composition, shared asynchronous requests and streams, retry and cancellation behavior, graph diagnostics, and logging. Sharing metadata is application-owned; core has no Glade dependency. Removes the unused no-op context disposal method. Publishing this release triggers the npm workflow."
+github_notes = "GRIP core {tag}: fixes for contextual composition, shared asynchronous requests and streams, retry and cancellation behavior, context lifetime, graph diagnostics, and logging. Abandoned populated contexts can collect while live children retain inherited providers; detached taps release their parameter context. Sharing metadata is application-owned; core has no Glade dependency. Removes the unused no-op context disposal method. Publishing this release triggers the npm trusted-publishing workflow."

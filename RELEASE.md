@@ -10,6 +10,24 @@ already contains it, so an automatic minor bump would select a later version.
 Core has no Glade dependency. Applications using Glade own their declaration
 types and check metadata against those types when constructing taps.
 
+### npm trusted publisher
+
+Before creating the GitHub Release, configure the package's trusted publisher
+in the npm settings for `@owebeeone/grip-core`:
+
+- Provider: GitHub Actions
+- Organization or user: `owebeeone`
+- Repository: `grip-core`
+- Workflow filename: `publish.yml`
+- Environment name: leave empty (the publish job does not use an environment)
+- Allowed actions: enable direct publishing with `npm publish`
+
+The publication job uses GitHub's OIDC identity with `id-token: write` and a
+current npm CLI. It does not use an npm publishing token. Confirm the trusted
+publisher is saved before starting the release workflow.
+
+### Verification and publication
+
 The release checks install the frozen pnpm lock, run the core regression suite,
 build both module formats and declarations, and inspect package contents. The
 GitHub Actions workflow also installs the packed core package in an isolated

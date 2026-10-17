@@ -78,28 +78,21 @@ jobs:
           package-manager-cache: false
       - run: pnpm install --frozen-lockfile
         working-directory: workspace/grip-core
-      # pnpm publish packs and then hands the tarball to the npm CLI on PATH,
-      # so that CLI decides the auth methods available.
       - name: Select an npm CLI with trusted-publishing support
         run: npm install --global npm@latest
       - name: Require tag/package version agreement
         working-directory: workspace/grip-core
         run: |
           node -e 'const p=require("./package.json"); const t=process.env.RELEASE_TAG.replace(/^v/, ""); if (p.version !== t) throw new Error(`package ${p.version} != tag ${t}`)'
-      # grip-core has no prepack, so build here; pnpm publish packs dist as built.
+      # grip-core has no prepack, so build here; npm publish packs dist as built.
       - run: pnpm build
         working-directory: workspace/grip-core
-      - name: Publish if this immutable version is absent
+      - name: Publish with npm trusted publishing if this version is absent
         working-directory: workspace/grip-core
-        env:
-          # A token is needed until npm Trusted Publishing is configured for
-          # this package and publish.yml; then remove this secret and npm will
-          # use the job's OIDC token automatically.
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: |
           package_spec=$(node -p "const p=require('./package.json'); p.name + '@' + p.version")
           if pnpm view "$package_spec" version >/dev/null 2>&1; then
             echo "$package_spec is already published"
           else
-            pnpm publish --access public --no-git-checks
+            npm publish --access public
           fi
