@@ -20,9 +20,7 @@ import type { Grok } from "./grok";
 import type { GripContextLike } from "./context";
 import type { ShareDecl } from "./share_decl";
 
-// The share-declaration vocabulary rides the glade-decl contract; `share_decl`
-// is grip-core's single seam onto it. Re-exported here so existing importers
-// (`./tap`) keep their path.
+// Sharing metadata belongs to the application or integration, not core.
 export type { ShareDecl } from "./share_decl";
 
 /**
@@ -39,7 +37,7 @@ export type { ShareDecl } from "./share_decl";
  * The engine manages the lifecycle of Taps, calling appropriate hooks
  * when they are attached, connected, or disconnected.
  */
-export interface Tap {
+export interface Tap<TShare extends ShareDecl = ShareDecl> {
   readonly kind: "Tap";
 
   /** The Grips this Tap can provide */
@@ -51,8 +49,8 @@ export interface Tap {
   /** Parameters read from the home (provider) context lineage (affect all destinations under the provider) */
   homeParamGrips?: readonly Grip<any>[];
 
-  /** Optional: declares this Tap's value as a sharable glade surface. */
-  share?: ShareDecl;
+  /** Optional, opaque metadata owned and checked by the sharing integration. */
+  readonly share?: TShare;
 
   /** Optional capture: the Tap's current sharable value. */
   getShareValue?(): unknown;

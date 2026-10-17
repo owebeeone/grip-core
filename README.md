@@ -41,6 +41,42 @@ A `GripContext` forms a Directed Acyclic Graph (DAG) that provides scope and par
 
 `Grok` is the central engine that manages the graph, resolves Tap-to-consumer connections, and coordinates value delivery.
 
+## **Optional Sharing Integrations**
+
+Core has no Glade dependency. A tap's optional `share` field carries an opaque
+metadata object owned by the application or integration. `Tap<TShare>` and
+`AtomValueTap<T, TShare>` preserve that type; `createAtomValueTap` infers it.
+Core does not inspect metadata fields or choose a sharing protocol. The slot
+is readonly after construction, preserving its association with that type.
+
+```ts
+import { createAtomValueTap, GripOf, GripRegistry } from "@owebeeone/grip-core";
+
+const COUNT = GripOf(new GripRegistry())<number>("Count", 0);
+
+interface ApplicationShare {
+  channel: string;
+  revision: number;
+}
+
+function sharedCounter(share: ApplicationShare) {
+  return createAtomValueTap(COUNT, { initial: 0, share });
+}
+```
+
+For Glade, define the application's declaration using Glade's own `Shape`,
+`Authority`, `DomainAnchor`, and `ZoneKind` types and require it in the
+integration helper's argument. TypeScript then checks those values when the
+application compiles. Only that integration imports both packages.
+
+`grok.listSharedTaps()` discovers taps carrying metadata, but returns plain
+taps with opaque metadata. An adapter must validate metadata before treating
+it as a particular integration's declaration, or maintain typed registration.
+The existing capture, apply, and subscribe hooks expose values independently
+of the metadata vocabulary.
+
+See [release and migration guidance](RELEASE.md) for the 0.3.0 changes.
+
 ## **Building Taps**
 
 Taps are the primary abstraction you'll work with in `grip-core`. There are three main types of Taps, each suited for different use cases.

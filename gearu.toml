@@ -1,0 +1,19 @@
+[project]
+name = "grip-core"
+branch = "main"
+remote = "origin"
+tag_prefix = "v"
+github_repo = "owebeeone/grip-core"
+
+[npm]
+manifest = "package.json"
+
+[release]
+checks = [
+    ["pnpm", "install", "--frozen-lockfile"],
+    ["pnpm", "exec", "vitest", "run", "--configLoader", "runner", "--no-file-parallelism"],
+    ["pnpm", "build"],
+    ["npm", "pack", "--dry-run"],
+]
+commit_message = "chore(release): grip-core {version}"
+github_notes = "GRIP core {tag}: fixes for contextual composition, shared asynchronous requests and streams, retry and cancellation behavior, graph diagnostics, and logging. Sharing metadata is application-owned; core has no Glade dependency. Removes the unused no-op context disposal method. Publishing this release triggers the npm workflow."

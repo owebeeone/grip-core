@@ -333,9 +333,8 @@ export class Grok {
   }
 
   /**
-   * Advertisement (GQ-5, GDL-029): enumerate registered Taps that declare a
-   * glade `share`. A binder (grip-share) walks these to bind sharable surfaces.
-   * Protocol-free — grok knows nothing of glade; a share-free app gets `[]`.
+   * Enumerate registered Taps carrying opaque sharing metadata. An integration
+   * owns that metadata's type and meaning; a share-free app gets `[]`.
    *
    * @returns The distinct share-declaring Taps registered in the graph
    */

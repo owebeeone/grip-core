@@ -1,6 +1,5 @@
-// Base-tap glade share feature (GLP-0005, P3.S1, GQ-5). A tap declares a glade
-// `share` and thereby advertises as sharable via grok; the capture/apply hooks
-// round-trip. grip-core imports no glade types — this is protocol-free.
+// Application-owned sharing metadata advertises a tap through grok. The
+// capture/apply hooks round-trip without core knowing the metadata vocabulary.
 
 import { describe, it, expect } from "vitest";
 
@@ -15,7 +14,7 @@ function setup() {
   return { defineGrip, grok };
 }
 
-describe("base-tap glade share (GQ-5)", () => {
+describe("application-owned tap sharing", () => {
   it("a tap with a share decl advertises; one without does not", () => {
     const { defineGrip, grok } = setup();
     const COUNT = defineGrip<number>("Count", 0);

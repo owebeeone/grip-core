@@ -20,16 +20,11 @@ jobs:
     name: Test package
     runs-on: ubuntu-latest
     steps:
-      # pnpm.overrides maps @owebeeone/glade-decl to file:../glade-decl-ts, so
-      # the install needs that checkout beside this one.
+      # Core must build and install independently of any integration checkout.
       - uses: actions/checkout@v6
         with:
           ref: ${{ env.RELEASE_TAG }}
           path: workspace/grip-core
-      - uses: actions/checkout@v6
-        with:
-          repository: owebeeone/glade-decl-ts
-          path: workspace/glade-decl-ts
       - uses: pnpm/action-setup@v4
         with:
           version: 10.24.0
@@ -40,12 +35,10 @@ jobs:
           cache-dependency-path: workspace/grip-core/pnpm-lock.yaml
       - run: pnpm install --frozen-lockfile
         working-directory: workspace/grip-core
-      - run: pnpm test
+      - run: pnpm exec vitest run --configLoader runner --no-file-parallelism
         working-directory: workspace/grip-core
       - run: pnpm build
         working-directory: workspace/grip-core
-      # The consumer resolves @owebeeone/glade-decl@^0.1.0 from the registry,
-      # so glade-decl must be published before this release is cut.
       - name: Smoke-test packed consumer install
         working-directory: workspace/grip-core
         run: |
@@ -57,10 +50,9 @@ jobs:
           echo '{ "name": "consumer", "private": true, "type": "module" }' > package.json
           pnpm add "$package_dir/$package_tarball" typescript@5.9.3
           node --input-type=module -e "const m = await import('@owebeeone/grip-core'); if (!m.Grok || !m.Grip || !m.AtomValueTap) { throw new Error('missing public grip-core export'); }"
-          echo 'import type { Tap } from "@owebeeone/grip-core"; export type Checked = NonNullable<Tap["share"]>["shape"];' > check.ts
+          echo 'import type { Tap } from "@owebeeone/grip-core"; export type Checked = NonNullable<Tap<{ channel: string }>["share"]>["channel"];' > check.ts
           pnpm exec tsc --noEmit --strict --module nodenext --skipLibCheck false check.ts
-          # node16 reads the import condition's own types, index.d.mts; with
-          # one CommonJS index.d.ts for both, it refused the ESM-only glade-decl (TS1479).
+          # Verify both published declaration entry points for ESM consumers.
           pnpm exec tsc --noEmit --strict --module node16 --skipLibCheck false check.ts
 
   publish:
@@ -76,10 +68,6 @@ jobs:
         with:
           ref: ${{ env.RELEASE_TAG }}
           path: workspace/grip-core
-      - uses: actions/checkout@v6
-        with:
-          repository: owebeeone/glade-decl-ts
-          path: workspace/glade-decl-ts
       - uses: pnpm/action-setup@v4
         with:
           version: 10.24.0

@@ -54,7 +54,7 @@ export type AtomTap<T> = AtomTapHandle<T>;
  *
  * @template T - The type of value managed by this atom
  */
-export class AtomValueTap<T> extends BaseTapNoParams implements AtomTap<T>, Tap {
+export class AtomValueTap<T, TShare extends ShareDecl = ShareDecl> extends BaseTapNoParams implements AtomTap<T>, Tap<TShare> {
   /** Current value stored in the atom */
   private currentValue: T;
 
@@ -64,8 +64,8 @@ export class AtomValueTap<T> extends BaseTapNoParams implements AtomTap<T>, Tap 
   /** Optional Grip that provides the controller handle */
   private handleGrip: Grip<AtomTapHandle<T>> | undefined;
 
-  /** Optional glade share declaration (GQ-5) — makes this atom sharable. */
-  share?: ShareDecl;
+  /** Optional application-owned metadata — makes this atom sharable. */
+  readonly share?: TShare;
 
   /** Set of listeners to notify when the value changes */
   private listeners = new Set<() => void>();
@@ -78,7 +78,7 @@ export class AtomValueTap<T> extends BaseTapNoParams implements AtomTap<T>, Tap 
    * @param opts - Optional configuration
    * @param opts.handleGrip - Optional Grip for exposing the controller interface
    */
-  constructor(grip: Grip<T>, initial?: T | undefined, opts?: { handleGrip?: Grip<any>; share?: ShareDecl }) {
+  constructor(grip: Grip<T>, initial?: T | undefined, opts?: { handleGrip?: Grip<any>; share?: TShare }) {
     super({ provides: opts?.handleGrip ? [grip, opts.handleGrip] : [grip] });
     this.valueGrip = grip;
     this.handleGrip = opts?.handleGrip;
@@ -186,23 +186,23 @@ export class AtomValueTap<T> extends BaseTapNoParams implements AtomTap<T>, Tap 
  */
 
 // Overload 1: When initial value is provided and is non-nullable, return AtomValueTap with non-nullable type
-export function createAtomValueTap<T>(
+export function createAtomValueTap<T, TShare extends ShareDecl = ShareDecl>(
   grip: Grip<T | undefined>,
-  opts: { initial: NonNullable<T>; handleGrip?: Grip<any>; share?: ShareDecl },
-): AtomValueTap<NonNullable<T>>;
+  opts: { initial: NonNullable<T>; handleGrip?: Grip<any>; share?: TShare },
+): AtomValueTap<NonNullable<T>, TShare>;
 
 // Overload 2: Standard case - return AtomValueTap with original grip type
-export function createAtomValueTap<T>(
+export function createAtomValueTap<T, TShare extends ShareDecl = ShareDecl>(
   grip: Grip<T>,
-  opts?: { initial?: T; handleGrip?: Grip<any>; share?: ShareDecl },
-): AtomValueTap<T>;
+  opts?: { initial?: T; handleGrip?: Grip<any>; share?: TShare },
+): AtomValueTap<T, TShare>;
 
 // Implementation
-export function createAtomValueTap<T>(
+export function createAtomValueTap<T, TShare extends ShareDecl = ShareDecl>(
   grip: Grip<T>,
-  opts?: { initial?: T | undefined; handleGrip?: Grip<any>; share?: ShareDecl },
-): AtomValueTap<T> {
-  const tap = new AtomValueTap<T>(grip, opts?.initial, opts);
+  opts?: { initial?: T | undefined; handleGrip?: Grip<any>; share?: TShare },
+): AtomValueTap<T, TShare> {
+  const tap = new AtomValueTap<T, TShare>(grip, opts?.initial, opts);
   return tap;
 }
 

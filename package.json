@@ -37,9 +37,6 @@
     "dev": "tsup --watch",
     "test": "vitest"
   },
-  "dependencies": {
-    "@owebeeone/glade-decl": "^0.1.0"
-  },
   "devDependencies": {
     "@types/node": "^24.10.1",
     "prettier": "^3.6.2",
@@ -47,10 +44,5 @@
     "typescript": "^5.0.0",
     "util": "^0.12.5",
     "vitest": "^4.0.13"
-  },
-  "pnpm": {
-    "overrides": {
-      "@owebeeone/glade-decl": "file:../glade-decl-ts"
-    }
   }
 }
