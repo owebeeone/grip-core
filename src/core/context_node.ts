@@ -14,14 +14,14 @@
  * Lifetime Management:
  * - References to Drips are weak (allows GC of unused Drips)
  * - Drip references to ContextNodes are hard (keeps nodes alive while Drips exist)
- * - References to child ContextNodes are weak (allows GC of unused children)
- * - References to ProducerRecords are hard (keeps nodes alive while producers exist)
- * - References to Taps are hard (keeps nodes alive while Taps exist)
- * - Tap references to context nodes are hard (bidirectional strong references)
+ * - Graph links retain node shells, not the child contexts themselves
+ * - Live contexts own ProducerRecords and Taps through a weak-keyed ownership table
+ * - A live child retains the parent contexts needed for inheritance
+ * - Attached Taps and live Drips retain their contexts for application owners
  *
- * The ContextNode is kept alive as long as there are active Drips, active Taps,
- * or active children ContextNodes. This ensures proper cleanup when contexts
- * are no longer needed.
+ * The engine can retain a node shell until its periodic sweep. That shell must
+ * not root the context/producer cycle; once the context is collected, the sweep
+ * removes the shell after its consumers and child links are gone.
  *
  * Note: This interface is not part of the public API. It is used internally
  * by the engine to manage the graph structure and relationships.

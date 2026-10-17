@@ -179,6 +179,7 @@ export abstract class BaseTap implements Tap {
   onDetach(): void {
     this.engine = undefined;
     this.homeContext = undefined;
+    this.paramsContext = undefined;
     this.producer = undefined;
     // Clean up parameter subscriptions
     for (const unsub of this.paramDripsSubs.values()) {

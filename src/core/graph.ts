@@ -665,6 +665,15 @@ export class Destination implements DestinationParams {
   }
 }
 
+// Registrations belong to the live context, not the engine's diagnostic nodes.
+// A weak key allows the context/tap cycle to collect while preserving strong
+// ownership for applications retaining a context, drip, or attached tap.
+const contextOwnership = new WeakMap<GripContext, {
+  producers: Map<Grip<any>, ProducerRecord>;
+  producerByTap: Map<Tap | TapFactory, ProducerRecord>;
+  parents: Map<GripContextNode, GripContext>;
+}>();
+
 /**
  * Represents a node in the GRIP context graph.
  *
@@ -696,7 +705,10 @@ export class GripContextNode implements GripContextNodeIf {
 
   // One producer per Grip key - ProducerRecords cache the state of the
   // producer graph.
-  readonly producers: Map<Grip<any>, ProducerRecord> = new Map();
+  get producers(): Map<Grip<any>, ProducerRecord> {
+    const context = this.contextRef.deref();
+    return (context && contextOwnership.get(context)?.producers) || new Map();
+  }
   // One weakly-referenced drip per Grip at this destination context
   readonly consumers: Map<Grip<any>, WeakRef<Drip<any>>> = new Map();
   // A map of deleted consumers by grip key. These will be reused if the grip is requested again.
@@ -704,7 +716,10 @@ export class GripContextNode implements GripContextNodeIf {
   // Destination-side resolved map: which provider context id supplies each Grip
   readonly resolvedProviders: Map<Grip<any>, GripContextNode> = new Map();
   // Source-side: producer records per tap instance
-  readonly producerByTap: Map<Tap | TapFactory, ProducerRecord> = new Map();
+  get producerByTap(): Map<Tap | TapFactory, ProducerRecord> {
+    const context = this.contextRef.deref();
+    return (context && contextOwnership.get(context)?.producerByTap) || new Map();
+  }
   private lastSeen = Date.now();
 
   /**
@@ -717,6 +732,7 @@ export class GripContextNode implements GripContextNodeIf {
     this.grok = grok;
     this.id = ctx.id;
     this.contextRef = new WeakRef(ctx);
+    contextOwnership.set(ctx, { producers: new Map(), producerByTap: new Map(), parents: new Map() });
   }
 
   /**
@@ -794,6 +810,11 @@ export class GripContextNode implements GripContextNodeIf {
       // Sort by priority (lower priority values come first)
       this.parents.sort((a, b) => a.priority - b.priority);
       parent.children.push(this);
+      // A child owns its ancestors for inheritance. A parent must not own its
+      // children's contexts merely because their graph nodes remain indexed.
+      const context = this.contextRef.deref();
+      const parentContext = parent.contextRef.deref();
+      if (context && parentContext) contextOwnership.get(context)?.parents.set(parent, parentContext);
     }
   }
 
@@ -803,6 +824,8 @@ export class GripContextNode implements GripContextNodeIf {
       throw new Error(`Parent ${parent.id} is not a parent of ${this.id}`);
     }
     this.parents.splice(idx, 1);
+    const context = this.contextRef.deref();
+    if (context) contextOwnership.get(context)?.parents.delete(parent);
 
     const cidx = parent.children.indexOf(this);
     if (cidx !== -1) {
