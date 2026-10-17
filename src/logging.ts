@@ -2,7 +2,7 @@
  * GRIP Logging System - Integrated logging with tag-based filtering
  *
  * Provides a logging system that integrates with the GRIP context system
- * to enable dynamic, tag-based log filtering. Uses Consola for logging
+ * to enable dynamic, tag-based log filtering. Uses the local logging library
  * and provides fine-grained control over which log messages are displayed.
  *
  * Key Features:
@@ -10,7 +10,7 @@
  * - Dynamic log level control via GRIP contexts
  * - Production vs development logging modes
  * - Wildcard tag support for global logging
- * - Integration with Consola logging library
+ * - Browser-compatible reporters with a Consola-style interface
  *
  * Use Cases:
  * - Development debugging
@@ -19,7 +19,7 @@
  * - Error tracking and reporting
  */
 
-import { consola } from "./core/logger";
+import { consola, consoleReporter, isProduction, type LogRecord } from "./core/logger";
 import { Grip, GripRegistry } from "./core/grip";
 import { GripContext } from "./core/context";
 
@@ -45,6 +45,8 @@ export function getLoggingTagsGrip(registry: GripRegistry): Grip<Map<string, boo
   );
 }
 
+let unsubscribeLoggingTags: (() => void) | undefined;
+
 /**
  * Sets up the Consola logging system with GRIP integration.
  *
@@ -57,13 +59,15 @@ export function getLoggingTagsGrip(registry: GripRegistry): Grip<Map<string, boo
  * - Development mode: Enables tag-based filtering
  * - Dynamic tag updates: Responds to changes in the LOGGING_TAGS_GRIP
  * - Wildcard support: '*' tag enables all logs
- * - Recursion prevention: Uses separate Consola instance for output
+ * - Recursion prevention: Sends accepted messages directly to the console reporter
  *
  * @param context - The GRIP context that contains the logging configuration
  */
 export function setupConsola(context: GripContext) {
+  unsubscribeLoggingTags?.();
+  unsubscribeLoggingTags = undefined;
   // Disable all logging in production for performance
-  if (process.env.NODE_ENV === "production") {
+  if (isProduction()) {
     consola.setReporters([]); // Disable logs in production
     return;
   }
@@ -76,7 +80,7 @@ export function setupConsola(context: GripContext) {
   const drip = context.getGrok().query(loggingTagsGrip, context);
   // Custom reporter that filters logs based on enabled tags
   const customReporter: any = {
-    log: (logObj: any) => {
+    log: (logObj: LogRecord) => {
       const tag = logObj.tag;
 
       // Log if:
@@ -84,17 +88,17 @@ export function setupConsola(context: GripContext) {
       // 2. The specific tag is enabled in the map
       // 3. The wildcard '*' tag is enabled (global logging)
       if (!tag || enabledTags.get(tag) || enabledTags.get("*")) {
-        // Create a new consola instance to avoid recursive calls to this reporter.
-        // This new instance will have the default reporters.
-        new (consola as any).constructor().log(logObj);
+        consoleReporter.log(logObj);
       }
     },
   };
   // Pin the drip to avoid GC by storing on the reporter
   customReporter._drip = drip;
-  customReporter._unsub = drip.subscribe((tagsMap: Map<string, boolean> | undefined) => {
-    enabledTags = tagsMap || new Map();
+  unsubscribeLoggingTags = drip.subscribePriority(() => {
+    enabledTags = drip.get() ?? new Map();
   });
+  // A subscription does not emit a value that was resolved before setup.
+  enabledTags = drip.get() ?? new Map();
 
   // Replace the default reporters with our custom one
   consola.setReporters([customReporter]);

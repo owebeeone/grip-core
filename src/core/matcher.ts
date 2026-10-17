@@ -149,17 +149,15 @@ export class TapMatcher {
     const homeCtx = this.container.getGripHomeContext();
     const drip = homeCtx.getOrCreateConsumer(grip);
 
-    // For the very first evaluation, we need to get the initial value.
-    if (this.isFirstEvaluation) {
-      this.valuesMap.set(grip, drip.get());
-      this.changedGrips.add(grip);
-    }
-
     const unsubscribe = drip.subscribePriority(() => {
       this._onGripChanged(grip, drip);
     });
 
     this.dripSubscriptions.set(grip, unsubscribe);
+    // Subscribing may synchronously resolve and produce; read the resulting
+    // current value for every new input, including later-added bindings.
+    this.valuesMap.set(grip, drip.get());
+    this.changedGrips.add(grip);
   }
 
   /**

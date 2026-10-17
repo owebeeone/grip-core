@@ -412,7 +412,7 @@ export class SimpleResolver implements IGripResolver {
     const producerRecord = producerNode.getOrCreateProducerRecord(tap, tap.provides);
     const tapInstance = producerRecord.tap;
     // Attach the actual instance, including when registration receives a factory.
-    tapInstance.onAttach?.(context);
+    if (tapInstance.getHomeContext?.() !== context) tapInstance.onAttach?.(context);
 
     // Defensive: ensure tap instance reflects attachment even if onAttach was a no-op
     try {

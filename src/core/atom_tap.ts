@@ -82,7 +82,7 @@ export class AtomValueTap<T> extends BaseTapNoParams implements AtomTap<T>, Tap 
     super({ provides: opts?.handleGrip ? [grip, opts.handleGrip] : [grip] });
     this.valueGrip = grip;
     this.handleGrip = opts?.handleGrip;
-    this.currentValue = initial ?? grip.defaultValue!;
+    this.currentValue = initial === undefined ? grip.defaultValue! : initial;
     if (opts?.share) this.share = opts.share; // own property only when declared
   }
 
@@ -202,7 +202,7 @@ export function createAtomValueTap<T>(
   grip: Grip<T>,
   opts?: { initial?: T | undefined; handleGrip?: Grip<any>; share?: ShareDecl },
 ): AtomValueTap<T> {
-  const tap = new AtomValueTap<T>(grip, opts?.initial ?? grip.defaultValue!, opts);
+  const tap = new AtomValueTap<T>(grip, opts?.initial, opts);
   return tap;
 }
 
@@ -321,11 +321,12 @@ export class MultiAtomValueTap<Outs extends GripRecord = any>
     gripsMap: Map<Values<Outs>, GripValue<Values<Outs>> | undefined> | undefined,
     opts?: { handleGrip?: Grip<MultiAtomTapHandle<Outs>> },
   ) {
+    const valueGrips = [...new Set([...grips, ...(gripsMap?.keys() ?? [])])];
     const providesList = (opts?.handleGrip
-      ? [...grips, opts.handleGrip]
-      : grips) as unknown as readonly Grip<any>[];
+      ? [...valueGrips, opts.handleGrip]
+      : valueGrips) as unknown as readonly Grip<any>[];
     super({ provides: providesList });
-    this.valueGrips = grips;
+    this.valueGrips = valueGrips;
     this.handleGrip = opts?.handleGrip as unknown as Grip<MultiAtomTapHandle<Outs>> | undefined;
 
     const tracked = new Set<Values<Outs>>();

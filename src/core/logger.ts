@@ -1,10 +1,43 @@
 /**
- * Simple browser-compatible logger that replaces consola for browser environments.
- * 
- * Provides a consola-like API but uses console directly, avoiding Node.js dependencies.
+ * Small browser-compatible logging library with a Consola-style interface.
+ * Routes structured messages through shared reporters, without Node dependencies.
+ * Kept local to avoid Node dependencies/polyfills in browser applications.
+ * The original replacement explicitly recorded this browser-compatibility goal;
+ * it implements the small logging surface GRIP needs rather than all of Consola.
  */
 
-type LogLevel = 'log' | 'info' | 'warn' | 'error' | 'debug';
+type LogType = "log" | "info" | "warn" | "error" | "debug";
+
+export interface LogRecord {
+  type: LogType;
+  tag: string;
+  args: unknown[];
+}
+
+export interface LogReporter {
+  log(record: LogRecord): void;
+}
+
+/** Keep the standard environment expression visible to browser bundlers. */
+export function isProduction(): boolean {
+  try {
+    return process.env.NODE_ENV === "production";
+  } catch {
+    return false; // Unbundled browser without a process global.
+  }
+}
+
+/** Direct console output, usable by filtering reporters without recursion. */
+export const consoleReporter: LogReporter = {
+  log({ type, tag, args }) {
+    if (isProduction() && (type === "log" || type === "info" || type === "debug")) return;
+    console[type](...(tag ? [`[${tag}]`, ...args] : args));
+  },
+};
+
+// Tagged loggers consult this at delivery time, including instances created
+// before configuration. An empty array means silence at every level.
+let reporters: readonly LogReporter[] = [consoleReporter];
 
 interface Logger {
   log(...args: any[]): void;
@@ -18,50 +51,32 @@ interface Logger {
 class SimpleLogger implements Logger {
   private tag: string;
 
-  constructor(tag: string = '') {
+  constructor(tag: string = "") {
     this.tag = tag;
   }
 
-  private formatMessage(...args: any[]): any[] {
-    if (this.tag) {
-      return [`[${this.tag}]`, ...args];
-    }
-    return args;
-  }
-
-  private isProduction(): boolean {
-    // Check for production mode in a browser-safe way
-    if (typeof process !== 'undefined' && process.env) {
-      return process.env.NODE_ENV === 'production';
-    }
-    // In browser, assume development unless explicitly set
-    return false;
+  private write(type: LogType, args: unknown[]): void {
+    for (const reporter of reporters) reporter.log({ type, tag: this.tag, args });
   }
 
   log(...args: any[]): void {
-    if (!this.isProduction()) {
-      console.log(...this.formatMessage(...args));
-    }
+    this.write("log", args);
   }
 
   info(...args: any[]): void {
-    if (!this.isProduction()) {
-      console.info(...this.formatMessage(...args));
-    }
+    this.write("info", args);
   }
 
   warn(...args: any[]): void {
-    console.warn(...this.formatMessage(...args));
+    this.write("warn", args);
   }
 
   error(...args: any[]): void {
-    console.error(...this.formatMessage(...args));
+    this.write("error", args);
   }
 
   debug(...args: any[]): void {
-    if (!this.isProduction()) {
-      console.debug(...this.formatMessage(...args));
-    }
+    this.write("debug", args);
   }
 
   withTag(tag: string): Logger {
@@ -78,8 +93,7 @@ export const consola = {
   warn: (...args: any[]) => logger.warn(...args),
   error: (...args: any[]) => logger.error(...args),
   debug: (...args: any[]) => logger.debug(...args),
-  setReporters: (_reporters: any[]) => {
-    // No-op: we just use console directly
+  setReporters: (next: readonly LogReporter[]) => {
+    reporters = [...next];
   },
 };
-

@@ -409,13 +409,11 @@ export class QueryEvaluator {
    * @returns Object containing newly introduced and removed input Grips
    */
   public addBinding(binding: QueryBinding): AddBindingResult {
-    const newInputs = new Set<Grip<any>>();
-    let removedInputs = new Set<Grip<any>>();
+    const previousInputs = this.getAllInputGrips();
 
     // If replacing an existing binding, remove it first
     if (this.bindings.has(binding.id)) {
-      const removeResult = this.removeBinding(binding.id);
-      removedInputs = removeResult.removedInputs;
+      this.removeBinding(binding.id);
     }
 
     // Add the new binding
@@ -427,9 +425,6 @@ export class QueryEvaluator {
     // Update input Grip reference counts
     for (const grip of binding.query.conditions.keys()) {
       const currentCount = this.inputGripRefCounts.get(grip) || 0;
-      if (currentCount === 0) {
-        newInputs.add(grip);
-      }
       this.inputGripRefCounts.set(grip, currentCount + 1);
     }
 
@@ -441,7 +436,11 @@ export class QueryEvaluator {
       );
       this.updateHybridStateForPartition(changedPartitionRecord.items);
     }
-    return { newInputs, removedInputs };
+    // Replacement is one operation: retained inputs never leave the final set.
+    return {
+      newInputs: new Set([...this.inputGripRefCounts.keys()].filter(g => !previousInputs.has(g))),
+      removedInputs: new Set([...previousInputs].filter(g => !this.inputGripRefCounts.has(g))),
+    };
   }
 
   /**
@@ -462,7 +461,8 @@ export class QueryEvaluator {
     if (binding) {
       // Remove the binding
       this.bindings.delete(bindingId);
-      this.invertedIndex.remove(binding.query);
+      const queryStillUsed = [...this.bindings.values()].some(b => b.query === binding.query);
+      if (!queryStillUsed) this.invertedIndex.remove(binding.query);
       this.activeMatches.delete(bindingId);
       this.structurallyChangedQueries.add(binding.query);
       this.cache.clear();
@@ -481,7 +481,7 @@ export class QueryEvaluator {
       }
 
       // Update hybrid evaluation state
-      if (this.useHybridEvaluation) {
+      if (this.useHybridEvaluation && !queryStillUsed) {
         const removedFrom = this.queryPartitioner.remove(binding.query);
         if (removedFrom) {
           this.clearHybridStateForPartition(removedFrom.items);

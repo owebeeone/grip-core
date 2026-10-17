@@ -180,9 +180,9 @@ export class LruTtlCache<K, V> implements AsyncCache<K, V> {
     // Evict oldest entries until under capacity
     const overflow = this.map.size - this.maxEntries;
     for (let i = 0; i < overflow; i++) {
-      const firstKey = this.map.keys().next().value as K | undefined;
-      if (firstKey === undefined) break;
-      this.map.delete(firstKey);
+      const first = this.map.keys().next();
+      if (first.done) break;
+      this.map.delete(first.value);
     }
   }
 }

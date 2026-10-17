@@ -33,6 +33,8 @@ describe("Async Retry System", () => {
   let defineGrip: ReturnType<typeof GripOf>;
   let grok: Grok;
 
+  afterEach(() => vi.useRealTimers());
+
   beforeEach(() => {
     registry = new GripRegistry();
     defineGrip = GripOf(registry);
@@ -40,6 +42,7 @@ describe("Async Retry System", () => {
   });
 
   it("schedules retry with exponential backoff on error when listeners exist", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
     const OUT = defineGrip<number>("Out", 0);
     const STATE = defineGrip<AsyncRequestState>("State", {
       state: { type: "idle", retryAt: null },
@@ -73,10 +76,8 @@ describe("Async Retry System", () => {
     const drip = grok.query(OUT, ctx);
     const stateDrip = grok.query(STATE, ctx);
 
-    // Wait for initial request to fail
-    await sleep(50);
+    await vi.advanceTimersByTimeAsync(0);
     grok.flush();
-    await sleep(10);
 
     let state = stateDrip.get()!;
     expect(hasError(state.state)).toBe(true);
@@ -86,34 +87,27 @@ describe("Async Retry System", () => {
     // First retry should be scheduled at initialDelayMs (100ms)
     const firstRetryAt = state.state.retryAt!;
     const now = Date.now();
-    expect(firstRetryAt - now).toBeGreaterThanOrEqual(90); // Allow some timing variance
-    expect(firstRetryAt - now).toBeLessThanOrEqual(150);
+    expect(firstRetryAt - now).toBe(100);
+    expect(attemptCount).toBe(1);
 
     // Wait for first retry to execute
-    await sleep(150);
+    await vi.advanceTimersByTimeAsync(100);
     grok.flush();
-    await sleep(10);
 
     state = stateDrip.get()!;
-    // Should still be in error (second attempt failed) or success (if retry succeeded)
-    if (hasError(state.state)) {
-      expect(hasScheduledRetry(state.state)).toBe(true);
-
-      // Second retry should be scheduled at 2x delay (200ms)
-      const secondRetryAt = state.state.retryAt!;
-      expect(secondRetryAt - firstRetryAt).toBeGreaterThanOrEqual(190);
-      expect(secondRetryAt - firstRetryAt).toBeLessThanOrEqual(210);
-
-      // Wait for second retry to execute
-      await sleep(250);
-      grok.flush();
-      await sleep(10);
-    }
+    expect(hasError(state.state)).toBe(true);
+    expect(hasScheduledRetry(state.state)).toBe(true);
+    expect(attemptCount).toBe(2);
+    expect(state.state.retryAt! - firstRetryAt).toBe(200);
+    await vi.advanceTimersByTimeAsync(200);
+    grok.flush();
 
     // Third attempt should succeed
     state = stateDrip.get()!;
     expect(state.state.type).toBe("success");
     expect(drip.get()).toBe(42);
+    expect(attemptCount).toBe(3);
+    grok.unregisterTap(tap);
   });
 
   it("schedules retry when state Grip is queried (state Grips are output Grips)", async () => {
@@ -336,6 +330,7 @@ describe("Async Retry System", () => {
   });
 
   it("increments retryAttempt when scheduling retry", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
     const OUT = defineGrip<number>("Out", 0);
     const STATE = defineGrip<AsyncRequestState>("State", {
       state: { type: "idle", retryAt: null },
@@ -366,12 +361,10 @@ describe("Async Retry System", () => {
     const drip = grok.query(OUT, ctx);
     const stateDrip = grok.query(STATE, ctx);
 
-    // Wait for initial request to fail
-    await sleep(50);
+    await vi.advanceTimersByTimeAsync(0);
     grok.flush();
-    await sleep(10);
 
-    // Check that retryAttempt is tracked in history
+    // Inspect the first failure before advancing to its retry.
     let state = stateDrip.get()!;
     expect(hasError(state.state)).toBe(true);
     expect(hasScheduledRetry(state.state)).toBe(true);
@@ -380,8 +373,14 @@ describe("Async Retry System", () => {
     // First retry: attempt 1, delay = 50ms * 2^1 = 100ms (but we use initialDelayMs for first retry)
     // Actually, retryAttempt starts at 0, so first retry is attempt 0, delay = 50ms * 2^0 = 50ms
     const firstRetryDelay = getRetryTimeRemaining(state.state);
-    expect(firstRetryDelay).toBeGreaterThan(0);
-    expect(firstRetryDelay).toBeLessThanOrEqual(60); // Allow some variance
+    expect(firstRetryDelay).toBe(50);
+    expect(attemptCount).toBe(1);
+    await vi.advanceTimersByTimeAsync(50);
+    grok.flush();
+    state = stateDrip.get()!;
+    expect(attemptCount).toBe(2);
+    expect(getRetryTimeRemaining(state.state)).toBe(100);
+    grok.unregisterTap(tap);
   });
 
   it.skip("executes retry only when request key still matches", async () => {

@@ -282,7 +282,7 @@ export class GripGraphDumper {
       });
     }
 
-    const state = this.extractTapState(tap);
+    const state = this.opts.includeValues ? this.extractTapState(tap) : undefined;
     return {
       key,
       type: "Tap",

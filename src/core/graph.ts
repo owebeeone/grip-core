@@ -168,8 +168,6 @@ export class ProducerRecord {
       existing = new Destination(destNode, this.tap, this);
       this.destinations.set(destNode, existing);
       added = true;
-      // Register any per-destination parameter subscriptions
-      existing.registerDestinationParamDrips();
     }
     existing.addGrip(grip);
     if (process.env.NODE_ENV !== "production")
@@ -402,6 +400,7 @@ export class Destination implements DestinationParams {
     if (!this.tap.destinationParamGrips) return;
     const self = this;
     for (const grip of this.tap.destinationParamGrips) {
+      if (this.destinationDripsSubs.has(grip)) continue;
       const drip = this.destContextNode.getOrCreateConsumer(grip);
       // Do not force-resolve the param consumer to a provider here.
       // Recording the consumer is enough for provider publishes to reach it.
@@ -410,10 +409,8 @@ export class Destination implements DestinationParams {
         grip,
         drip.subscribePriority((_v) => {
           // The produceOnDestParams should exist, let's throw if it doesn't.
-          // Only trigger if there is an actual value change to a defined value
-          if (drip.get() !== undefined) {
-            self.tap.produceOnDestParams!(this.destContextNode.get_context(), grip);
-          }
+          // Undefined is a real transition (for example, a provider removal).
+          self.tap.produceOnDestParams!(this.destContextNode.get_context(), grip);
         }),
       );
       // Do not kick initial evaluation on undefined to avoid creating producer links preemptively

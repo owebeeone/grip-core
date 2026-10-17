@@ -52,7 +52,6 @@ interface DestinationState {
 
 interface StreamState<Event> {
   requestKey: string;
-  params: DestinationParams;
   destinations: Set<Destination>;
   abortController: AbortController;
   cleanupTimer: ReturnType<typeof setTimeout> | null;
@@ -135,7 +134,7 @@ class MultiOutputAsyncStreamTap<
     return {
       dripAdded: () => {
         const context = destination.getContext();
-        if (context) this.syncDestination(context);
+        if (context) this.syncDestination(context, true);
       },
       onDetach: () => {
         this.removeDestination(destination);
@@ -196,7 +195,7 @@ class MultiOutputAsyncStreamTap<
     this.produce();
   }
 
-  private syncDestination(dest: GripContext): void {
+  private syncDestination(dest: GripContext, replayLatest = false): void {
     const destination = this.getDestination(dest);
     if (!destination) return;
     const params = this.getDestinationParams(dest);
@@ -211,6 +210,10 @@ class MultiOutputAsyncStreamTap<
     }
 
     if (destinationState.requestKey === nextKey) {
+      const stream = this.streams.get(nextKey);
+      if (replayLatest && this.cacheLatest && stream?.latestEvent !== undefined) {
+        this.publishEventToDestination(destination, stream.latestEvent);
+      }
       return;
     }
 
@@ -218,7 +221,7 @@ class MultiOutputAsyncStreamTap<
     destinationState.requestKey = nextKey;
     this.publishReset(params, dest);
 
-    const stream = this.getOrCreateStream(nextKey, params);
+    const stream = this.getOrCreateStream(nextKey);
     if (stream.cleanupTimer) {
       clearTimeout(stream.cleanupTimer);
       stream.cleanupTimer = null;
@@ -232,13 +235,12 @@ class MultiOutputAsyncStreamTap<
     }
   }
 
-  private getOrCreateStream(requestKey: string, params: DestinationParams): StreamState<Event> {
+  private getOrCreateStream(requestKey: string): StreamState<Event> {
     let stream = this.streams.get(requestKey);
     if (stream) return stream;
 
     stream = {
       requestKey,
-      params,
       destinations: new Set(),
       abortController: new AbortController(),
       cleanupTimer: null,
@@ -253,9 +255,21 @@ class MultiOutputAsyncStreamTap<
   }
 
   private startStream(stream: StreamState<Event>): void {
+    // A destination's parameters are live. Its original owner may have moved
+    // to another key since this shared stream was first opened.
+    let params: DestinationParams | undefined;
+    for (const destination of stream.destinations) {
+      const context = destination.getContext();
+      const candidate = context ? this.getDestinationParams(context) : undefined;
+      if (candidate && this.keyOf(candidate, this.getState.bind(this) as any) === stream.requestKey) {
+        params = candidate;
+        break;
+      }
+    }
+    if (!params) return;
     stream.abortController = new AbortController();
     stream.running = true;
-    void this.runStream(stream, stream.params);
+    void this.runStream(stream, params);
   }
 
   private async runStream(stream: StreamState<Event>, params: DestinationParams): Promise<void> {

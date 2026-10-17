@@ -196,6 +196,8 @@ export class GripContext implements GripContextLike {
       throw new Error("Cycle detected in context DAG");
     }
 
+    this.grok.resolver.addParent(this, parent);
+
     return this;
   }
 

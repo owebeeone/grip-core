@@ -80,7 +80,7 @@ interface DestState {
   key?: string; // Keep for backward compatibility, will use requestKey
   requestKey?: string | null; // The cache key for this request
   deadlineTimer?: any;
-  pendingRetryArmed?: boolean;
+  retryCancelled?: boolean;
   // State tracking fields
   currentState: RequestState;
   history: StateHistoryEntry[];
@@ -138,6 +138,7 @@ export abstract class BaseAsyncTap extends BaseTap {
   // private readonly destState = new WeakMap<GripContext, DestState>();
   private readonly cache: AsyncCache<string, unknown>;
   private readonly pending = new Map<string, Promise<unknown>>();
+  private readonly pendingControllers = new Map<string, AbortController>();
   private readonly allControllers = new Set<AbortController>();
   private readonly allTimers = new Set<any>();
   // Shared request state keyed by request key
@@ -357,6 +358,10 @@ export abstract class BaseAsyncTap extends BaseTap {
           const destCtx = destination.getContext();
           if (destCtx) {
             this.publishState(destCtx);
+            if (grip === this.controllerGrip) {
+              destState.tapController ??= this.createController(destCtx);
+              this.publishController(destCtx);
+            }
           }
         }
       },
@@ -588,6 +593,7 @@ export abstract class BaseAsyncTap extends BaseTap {
   protected cancelRetry(dest: GripContext): void {
     const state = this.getDestState(dest);
     if (!state) return;
+    state.retryCancelled = true;
 
     // Clear retryAt in state
     if (state.currentState.retryAt !== null) {
@@ -595,9 +601,24 @@ export abstract class BaseAsyncTap extends BaseTap {
       this.publishState(dest);
     }
 
-    // Note: We don't cancel the shared retry timer here because other destinations
-    // might still need it. The timer will be cleaned up when all destinations are removed
-    // via the shared request state cleanup mechanism.
+    const requestState = state.requestKey ? this.requestStates.get(state.requestKey) : undefined;
+    if (requestState?.retryTimer && ![...requestState.destinations].some(destination => {
+      const context = destination.getContext();
+      const other = context ? this.getDestState(context) : undefined;
+      return other && !other.retryCancelled && other.currentState.retryAt !== null;
+    })) {
+      clearTimeout(requestState.retryTimer);
+      this.allTimers.delete(requestState.retryTimer);
+      requestState.retryTimer = null;
+    }
+  }
+
+  /** Invalidate an in-flight generation before an explicit replacement starts. */
+  private abortPendingRequest(key: string | null | undefined): void {
+    if (!key) return;
+    this.pendingControllers.get(key)?.abort();
+    this.pendingControllers.delete(key);
+    this.pending.delete(key);
   }
 
   /**
@@ -639,11 +660,11 @@ export abstract class BaseAsyncTap extends BaseTap {
         const state = this.getDestState(dest);
         if (!state) return;
 
-        // Abort any in-flight request
-        if (state.abortController) {
-          state.abortController.abort();
-          state.abortController = undefined;
-        }
+        // Explicit retry replaces the shared generation; all current peers
+        // receive the replacement result through the usual per-key fan-out.
+        this.abortPendingRequest(state.requestKey);
+        state.abortController = undefined;
+        state.controller = undefined;
 
         // Cancel any scheduled retries/refreshes
         this.cancelRetry(dest);
@@ -669,6 +690,8 @@ export abstract class BaseAsyncTap extends BaseTap {
           requestState.retryAttempt += 1;
         }
 
+        // An explicit retry opts this destination back into automatic retries.
+        state.retryCancelled = false;
         // Initiate new request
         this.kickoff(dest, forceRefetch === true);
       },
@@ -677,10 +700,9 @@ export abstract class BaseAsyncTap extends BaseTap {
         // Abort any in-flight request
         const state = this.getDestState(dest);
         if (!state) return;
-        if (state.abortController) {
-          state.abortController.abort();
-          state.abortController = undefined;
-        }
+        this.abortPendingRequest(state.requestKey);
+        state.abortController = undefined;
+        state.controller = undefined;
 
         // Cancel any scheduled retries/refreshes
         this.cancelRetry(dest);
@@ -703,6 +725,7 @@ export abstract class BaseAsyncTap extends BaseTap {
           }
         }
 
+        state.retryCancelled = false;
         // Initiate new request (will use stale-while-revalidate if data exists)
         this.kickoff(dest, forceRefetch === true);
       },
@@ -817,7 +840,7 @@ export abstract class BaseAsyncTap extends BaseTap {
     if (!destination) return;
 
     const state = this.getDestState(dest);
-    if (!state) return;
+    if (!state || state.retryCancelled) return;
     const requestKey = state.requestKey;
     if (!requestKey) return;
 
@@ -848,16 +871,18 @@ export abstract class BaseAsyncTap extends BaseTap {
     // Increment shared retry attempt
     requestState.retryAttempt += 1;
 
-    // Update state with retryAt
-    const newState: RequestState = {
-      ...state.currentState,
-      retryAt,
-    };
-    this.addHistoryEntry(dest, newState, "retry_scheduled");
+    // One failed request consumes one shared attempt, irrespective of fan-out.
+    for (const member of requestState.destinations) {
+      const context = member.getContext();
+      const memberState = context ? this.getDestState(context) : undefined;
+      if (context && memberState && !memberState.retryCancelled) {
+        this.addHistoryEntry(context, { ...memberState.currentState, retryAt }, "retry_scheduled");
+      }
+    }
 
     // Schedule shared retry timer
     const delay = retryAt - Date.now();
-    if (delay > 0) {
+    if (delay >= 0) {
       requestState.retryTimer = setTimeout(() => {
         this.allTimers.delete(requestState.retryTimer!);
         requestState.retryTimer = null;
@@ -879,7 +904,7 @@ export abstract class BaseAsyncTap extends BaseTap {
    */
   private executeRetry(dest: GripContext, requestKey: string): void {
     const state = this.getDestState(dest);
-    if (!state) return;
+    if (!state || state.retryCancelled) return;
     const destination = this.getDestination(dest);
 
     // Check if destination still exists
@@ -1077,7 +1102,7 @@ export abstract class BaseAsyncTap extends BaseTap {
     }
 
     // Kickoff refresh (use stale-while-revalidate pattern)
-    this.kickoff(dest, false); // Don't force refetch, use cache if available
+    this.kickoff(dest, true); // Preserve stale output, but actually fetch fresh data.
   }
 
   private handleRequestKeyChange(
@@ -1109,26 +1134,20 @@ export abstract class BaseAsyncTap extends BaseTap {
     }
 
     // 2. Abort in-flight request for old key (if no other destinations using it)
-    if (state.abortController) {
-      const oldRequestState = this.requestStates.get(oldKey);
-      const otherDestinationsUsingOldKey = oldRequestState
-        ? Array.from(oldRequestState.destinations).filter(d => d !== destination)
-        : [];
-      
-      if (otherDestinationsUsingOldKey.length === 0) {
-        // No other destinations using old key - safe to abort
-        state.abortController.abort();
-        this.allControllers.delete(state.abortController);
-        this.pending.delete(oldKey);
-      }
-      // If other destinations are using old key, don't abort (they need the request)
-      
-      state.abortController = undefined;
+    const oldRequestState = this.requestStates.get(oldKey);
+    if (!oldRequestState || oldRequestState.destinations.size === 0) {
+      this.abortPendingRequest(oldKey);
     }
+    state.abortController = undefined;
+    state.controller = undefined;
+    // Its old deadline belongs to the shared request, not to this consumer's
+    // next key. The request closure remains responsible for cancelling it.
+    state.deadlineTimer = undefined;
 
     // 3. Update destState.requestKey
     state.key = newKey ?? undefined;
     state.requestKey = newKey;
+    state.retryCancelled = false;
 
     // 4. Add destination to new request state
     if (newKey) {
@@ -1163,7 +1182,7 @@ export abstract class BaseAsyncTap extends BaseTap {
     } else {
       // No key available, reset to idle
       const params = this.getDestinationParams(dest);
-      if (params) {
+      if (params && !this.asyncOpts.keepStaleDataOnTransition) {
         const resets = this.getResetUpdates(params);
         if (resets.size > 0) this.publish(resets, dest);
       }
@@ -1412,10 +1431,6 @@ export abstract class BaseAsyncTap extends BaseTap {
    * Prevents unnecessary requests when multiple destinations connect simultaneously.
    */
   onConnect(dest: GripContext, grip: Grip<any>): void {
-    if ((this.producer?.getDestinations().size ?? 0) === 1) {
-      super.onConnect(dest, grip);
-    }
-
     // Context is automatically created via Destination constructor
     // Track per-request-key and add destination to shared request state
     const state = this.getDestState(dest);
@@ -1507,6 +1522,8 @@ export abstract class BaseAsyncTap extends BaseTap {
       }
       this.allControllers.clear();
       this.allTimers.clear();
+      this.pending.clear();
+      this.pendingControllers.clear();
     } finally {
       super.onDetach();
     }
@@ -1541,9 +1558,14 @@ export abstract class BaseAsyncTap extends BaseTap {
 
     // Parameters insufficient - abort and reset outputs
     if (!key) {
-      if (state.abortController) state.abortController.abort();
+      if (prevKey) {
+        this.handleRequestKeyChange(dest, prevKey, null);
+        return;
+      }
       state.key = undefined;
       state.requestKey = null;
+      state.currentState = { type: "idle", retryAt: null };
+      this.publishState(dest);
       
       if (!this.asyncOpts.keepStaleDataOnTransition) {
         const resets = this.getResetUpdates(params);
@@ -1640,50 +1662,13 @@ export abstract class BaseAsyncTap extends BaseTap {
     // Check for in-flight request with same key
     const existing = this.pending.get(key);
     if (existing) {
-      // Arm retry for this destination if pending completes without cache entry
-      state.pendingRetryArmed = true;
-      existing
-        .then(() => {
-          const fromCache = this.cache.get(key);
-          if (!fromCache) return; // publish handled in finally
-        })
-        .catch(() => {
-          /* ignore; handled in finally */
-        })
-        .finally(() => {
-          const fromCache = this.cache.get(key);
-          if (fromCache) {
-            // Publish cached value to all destinations
-            const destinations = Array.from(this.producer?.getDestinations().keys() ?? []);
-            for (const destNode of destinations) {
-              const dctx = destNode.get_context();
-              if (!dctx) continue;
-              const dparams = this.getDestinationParams(dctx);
-              if (!dparams) continue;
-              const k2 = this.getRequestKey(dparams);
-              if (k2 !== key) continue;
-              const updates = this.mapResultToUpdates(dparams, fromCache.value);
-              this.publish(updates, dctx);
-              const dstate = this.getDestState(dctx);
-              if (dstate) {
-                dstate.key = key;
-              }
-            }
-          } else if (state.pendingRetryArmed && this.pending.get(key) === undefined) {
-            // No cache produced; retry once if destination still targets this key
-            state.pendingRetryArmed = false;
-            const destParams = this.getDestinationParams(dest);
-            if (destParams && this.getRequestKey(destParams) === key) {
-              this.kickoff(dest, true);
-            }
-          }
-        });
+      // The request's handlers publish to every current destination for this
+      // key. Absence of a cache entry is not a reason to issue another request.
       return;
     }
 
     // Start new request - transition to loading or stale-while-revalidate
     state.seq += 1;
-    const seq = state.seq;
     if (state.controller) state.controller.abort();
     if (state.abortController) {
       state.abortController.abort();
@@ -1739,17 +1724,29 @@ export abstract class BaseAsyncTap extends BaseTap {
       this.allTimers.delete(state.deadlineTimer);
       state.deadlineTimer = undefined;
     }
+    let deadlineExpired = false;
     if (this.asyncOpts.deadlineMs > 0) {
-      state.deadlineTimer = setTimeout(() => controller.abort(), this.asyncOpts.deadlineMs);
+      state.deadlineTimer = setTimeout(() => {
+        deadlineExpired = true;
+        controller.abort();
+      }, this.asyncOpts.deadlineMs);
       this.allTimers.add(state.deadlineTimer);
     }
 
     // Execute request
-    const promise = this.buildRequest(params, controller.signal)
+    const deadlineTimer = state.deadlineTimer;
+    let request: Promise<unknown>;
+    try {
+      request = this.buildRequest(params, controller.signal);
+    } catch (error) {
+      request = Promise.reject(error);
+    }
+    const promise = request
       .then((result) => {
         if (controller.signal.aborted) return;
-        // Latest-only guard
-        if (this.asyncOpts.latestOnly && seq !== state.seq) return;
+        // Identity is per shared request, not its initiating destination (which
+        // may now serve another key while peers still need this request).
+        if (this.pending.get(key) !== promise) return;
 
         // Cache result if TTL configured
         if (this.asyncOpts.cacheTtlMs > 0 && key)
@@ -1835,10 +1832,12 @@ export abstract class BaseAsyncTap extends BaseTap {
         }
       })
       .catch((error) => {
+        if ((controller.signal.aborted && !deadlineExpired) || this.pending.get(key) !== promise) return;
         // Handle errors - transition to error or stale-with-error
         if (!this.producer) return;
         
         const failedAt = Date.now();
+        let retryDestination: GripContext | undefined;
         for (const destNode of Array.from(this.producer.getDestinations().keys())) {
           const dctx = destNode.get_context();
           if (!dctx) continue;
@@ -1891,19 +1890,27 @@ export abstract class BaseAsyncTap extends BaseTap {
           // Ensure state is published before scheduling retry (so listener count is up to date)
           this.publishState(dctx);
           // Schedule retry if configured and listeners exist
-          this.scheduleRetry(dctx);
+          if (!dstate.retryCancelled) retryDestination ??= dctx;
         }
+        if (retryDestination) this.scheduleRetry(retryDestination);
         // Swallow network errors; optionally map to diagnostics in subclass
       })
       .finally(() => {
-        this.pending.delete(key);
-        if (state.deadlineTimer) {
-          clearTimeout(state.deadlineTimer);
-          this.allTimers.delete(state.deadlineTimer);
-          state.deadlineTimer = undefined;
+        if (this.pending.get(key) === promise) {
+          this.pending.delete(key);
+          this.pendingControllers.delete(key);
         }
+        if (deadlineTimer) {
+          clearTimeout(deadlineTimer);
+          this.allTimers.delete(deadlineTimer);
+          if (state.deadlineTimer === deadlineTimer) state.deadlineTimer = undefined;
+        }
+        this.allControllers.delete(controller);
+        if (state.abortController === controller) state.abortController = undefined;
+        if (state.controller === controller) state.controller = undefined;
       });
     this.pending.set(key, promise);
+    this.pendingControllers.set(key, controller);
   }
 }
 

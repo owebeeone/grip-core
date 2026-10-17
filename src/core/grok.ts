@@ -190,16 +190,6 @@ export class Grok {
   }
 
   /**
-   * Disposes a context, clearing caches and allowing garbage collection.
-   *
-   * @param ctx - The context to dispose
-   */
-  disposeContext(ctx: GripContext): void {
-    // Optionally: detach from parents to break strong references in contexts
-    // There is no public API on GripContext to remove parents; we rely on graph WeakRef GC.
-  }
-
-  /**
    * Creates a dual context container with separate home and presentation contexts.
    *
    * This is useful for transform Taps that read from one context hierarchy

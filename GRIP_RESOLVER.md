@@ -102,7 +102,7 @@ Why track a Set<Grip> per node?
 
 Delivery and deferred cleanup:
 - During producer updates, a tap iterates `destinationIndex`. If a node's `contextRef.deref()` is missing or the node is marked disposed, the tap should skip it and enqueue the node for cleanup (do not mutate the map while iterating). After the pass (e.g., `queueMicrotask`), remove those nodes and invoke `onDisconnect` for the recorded grips.
-- The engine's periodic GC and/or explicit `disposeContext` will also prune nodes; taps may receive disconnect callbacks accordingly and should prune `destinationIndex`.
+- The engine's periodic GC will also prune nodes; taps may receive disconnect callbacks accordingly and should prune `destinationIndex`.
 
 The engine calls connection callbacks to keep this index in sync (see API below).
 
@@ -157,7 +157,7 @@ The `visit` callback can implement the overshadowing subtraction and the re-reso
   - A `WeakRef<GripContext>` so nodes do not keep contexts alive
   - Back-references to parents and children nodes to support traversals
   - Per-node runtime data (`localProviders`, `resolvedMap`, `dripByGrip`)
-- Parents hold only weak references to children through `children: WeakSet<GripContextNode>` so GC can reap nodes when the corresponding `GripContext` is unreachable. The engine's periodic GC pass (or explicit `disposeContext`) prunes nodes with a dead context and no shared drips.
+- Parents hold only weak references to children through `children: WeakSet<GripContextNode>` so GC can reap nodes when the corresponding `GripContext` is unreachable. The engine's periodic GC pass prunes nodes with a dead context and no shared drips.
 
 This design lets us traverse and manage connections robustly while respecting the requirement that application-held contexts are not strongly referenced by the engine.
 
