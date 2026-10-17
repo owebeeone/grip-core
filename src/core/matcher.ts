@@ -296,6 +296,12 @@ export class MatchingContext extends DualContextContainer {
   }
 }
 
+// The keyed wrapper must live as long as either of its inner contexts. Otherwise
+// the wrapper's weak cache can expire while initialized source taps remain live,
+// and reopening the same key would run init again on that existing source.
+// Weak keys still allow the entire group to be collected when no context is used.
+const matchingContextOwners = new WeakMap<GripContext, MatchingContext>();
+
 registerMatchingContextFactory((parent, key, opts) => {
   const home = parent.getOrCreateChildContext(key, undefined, {
     id: opts?.sourceId ?? makeContextChildId(parent.id, key, "source"),
@@ -305,5 +311,8 @@ registerMatchingContextFactory((parent, key, opts) => {
     id: opts?.presentationId ?? makeContextChildId(parent.id, key, "presentation"),
     priority: opts?.presentationPriority ?? 0,
   });
-  return new MatchingContext(home, presentation);
+  const matching = new MatchingContext(home, presentation);
+  matchingContextOwners.set(home, matching);
+  matchingContextOwners.set(presentation, matching);
+  return matching;
 });
